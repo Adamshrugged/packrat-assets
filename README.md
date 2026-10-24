@@ -33,6 +33,10 @@ packrat serve        # web UI at http://localhost:8765
 packrat scan         # re-index the library folders
 ```
 
+Settings live in `~/.config/packrat/config.toml` on Linux and `%APPDATA%\packrat\config.toml` on Windows. The database and thumbnails live in `~/.local/share/packrat` or `%LOCALAPPDATA%\packrat`.
+
+Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. It has no login, so don't expose it to your network unless you trust everyone on it.
+
 ## License
 
 The Packrat code is released under the [MIT License](LICENSE). This covers Packrat itself, not the assets it manages.

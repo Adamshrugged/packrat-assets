@@ -1,7 +1,11 @@
 import os
 import shutil
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import platformdirs
+
+APP = "packrat"
 
 
 @dataclass
@@ -22,6 +26,7 @@ class Config:
     itch_download_dir: str | None = None
     itch_sync_hours: float = 0
     itch_auto_download: bool = False
+    allowed_hosts: list[str] = field(default_factory=list)
 
     @property
     def db_path(self) -> str:
@@ -56,11 +61,19 @@ def find_7z() -> str | None:
     return None
 
 
+def config_dir() -> str:
+    """Per-user settings folder: ~/.config/packrat on Linux, %APPDATA%\\packrat on Windows."""
+    return platformdirs.user_config_dir(APP, appauthor=False, roaming=True)
+
+
+def data_dir() -> str:
+    """Per-user data folder (database, thumbnails): ~/.local/share/packrat on Linux,
+    %LOCALAPPDATA%\\packrat on Windows."""
+    return platformdirs.user_data_dir(APP, appauthor=False)
+
+
 def default_path() -> str:
-    return os.environ.get(
-        "PACKRAT_CONFIG",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.toml"),
-    )
+    return os.environ.get("PACKRAT_CONFIG", os.path.join(config_dir(), "config.toml"))
 
 
 def load(path: str | None = None) -> Config:
@@ -73,10 +86,10 @@ def load(path: str | None = None) -> Config:
     cat = raw.get("catalog", {})
     srv = raw.get("server", {})
 
-    data_dir = cat.get("data_dir", "data")
-    if not os.path.isabs(data_dir):
-        data_dir = os.path.join(base, data_dir)
-    os.makedirs(data_dir, exist_ok=True)
+    data = os.path.expanduser(cat.get("data_dir") or data_dir())
+    if not os.path.isabs(data):
+        data = os.path.join(base, data)
+    os.makedirs(data, exist_ok=True)
 
     roots = []
     for r in raw.get("roots", []):
@@ -91,11 +104,12 @@ def load(path: str | None = None) -> Config:
     itch = raw.get("itch", {})
     return Config(
         roots=roots,
-        data_dir=data_dir,
+        data_dir=data,
         host=srv.get("host", "127.0.0.1"),
         port=int(srv.get("port", 8765)),
         sevenzip=cat.get("sevenzip") or find_7z(),
         itch_download_dir=os.path.normpath(itch["download_dir"]) if itch.get("download_dir") else None,
         itch_sync_hours=float(itch.get("sync_every_hours", 0)),
         itch_auto_download=bool(itch.get("auto_download", False)),
+        allowed_hosts=[h.lower() for h in srv.get("allowed_hosts", [])],
     )

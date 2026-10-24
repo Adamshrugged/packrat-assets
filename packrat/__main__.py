@@ -43,7 +43,11 @@ def main() -> None:
     elif args.cmd == "serve":
         import uvicorn
         from .app import create_app
+        from .guard import is_loopback
         print(f"Packrat on http://localhost:{cfg.port}")
+        if not is_loopback(cfg.host):
+            print(f"WARNING: listening on {cfg.host}, so anyone on your network can use Packrat. "
+                  "It has no login yet.")
         uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning")
 
     elif args.cmd == "thumbs":

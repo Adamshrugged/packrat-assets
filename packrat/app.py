@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db
+from .guard import HostGuard
 from .archives import read_member
 from .kinds import THUMBABLE
 from .thumbs import get_thumb
@@ -605,6 +606,7 @@ def create_app(cfg) -> FastAPI:
 
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
     app.add_middleware(TextGZip)
+    app.add_middleware(HostGuard, bind_host=cfg.host, allowed_hosts=cfg.allowed_hosts)
     return app
 
 
