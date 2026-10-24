@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Packrat</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='6' height='6' fill='%235b8def'/%3E%3Crect x='9' y='1' width='6' height='6' fill='%23e8a33d'/%3E%3Crect x='1' y='9' width='6' height='6' fill='%2340b07a'/%3E%3Crect x='9' y='9' width='6' height='6' fill='%23d9576b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a href="#/" class="brand"><span class="logo"></span>Packrat</a>
+    <nav class="nav">
+      <a href="#/" data-nav="library">Library</a>
+      <a href="#/purchases" data-nav="purchases">Purchases <span id="nav-missing" class="count" hidden></span></a>
+      <a href="#/guide" data-nav="guide">Guide</a>
+    </nav>
+    <form id="search" role="search">
+      <input id="q" type="search" placeholder="Search packs and files…  ( / )" autocomplete="off">
+    </form>
+    <div class="scan">
+      <span id="scan-status" class="dim"></span>
+      <button id="rescan" class="btn" type="button" title="Re-index the library folders">Rescan</button>
+    </div>
+  </header>
+  <main id="view"></main>
+  <div id="lightbox" hidden></div>
+  <div id="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

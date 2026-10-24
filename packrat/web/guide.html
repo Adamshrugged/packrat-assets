@@ -1,0 +1,95 @@
+<div class="guide-layout" data-os-show="windows">
+<aside class="guide-nav">
+  <div class="os-toggle" role="group" aria-label="Your computer">
+    <span class="os-label">My computer</span>
+    <button type="button" data-set-os="windows">Windows</button>
+    <button type="button" data-set-os="linux">Linux</button>
+  </div>
+  <nav>
+    <a href="#g-use">Everyday use</a>
+    <a href="#g-itch">itch.io purchases</a>
+    <a href="#g-claude-connect">Connect Claude</a>
+    <a href="#g-claude-use">Using it from Claude</a>
+    <a href="#g-trouble">Troubleshooting</a>
+  </nav>
+</aside>
+
+<article class="guide">
+<h1>Guide</h1>
+<p class="lead">How to browse your library, sync itch.io purchases, and use Packrat from Claude. Commands follow the <b>Windows / Linux</b> switch.</p>
+
+<h2 id="g-use">Everyday use</h2>
+<h3>Library</h3>
+<ul>
+  <li><b>Library</b> browses packs by folder, type and tag. <b>Search</b> (press <kbd>/</kbd>) finds packs and individual files, including files inside zip and rar archives.</li>
+  <li>On a pack page, <b>Copy path</b> copies where the pack lives on disk. The <b>Your notes</b> panel stores vendor, license, tags, rating and favorite.</li>
+  <li><b>Rescan</b> (top right) re-indexes your library folders after you add or move packs.</li>
+</ul>
+<h3>Adding new assets</h3>
+<ul>
+  <li>Put each pack in its own folder (or leave it as a single zip/rar) directly inside one of your library folders, then press <b>Rescan</b>.</li>
+  <li>Folders that only contain archives (like <code>Music</code>) are treated as bundles automatically, so each archive inside becomes its own pack.</li>
+  <li>If you keep the original zips next to extracted copies, store them outside your library folders so they don't show up as duplicates.</li>
+</ul>
+
+<h2 id="g-itch">itch.io purchases</h2>
+<ul>
+  <li><b>Purchases</b> lists everything you own on itch.io and whether it's in your library. Files are matched by exact name and size, then by size only, then by pack name.</li>
+  <li><b>Sync itch.io</b> imports new purchases. Packrat can also sync on a schedule while it runs.</li>
+  <li><b>Download</b> (per purchase) or <b>Download all missing</b> saves files to your download folder, one folder per purchase. Each download is checked against itch.io's checksum before it's kept.</li>
+  <li>Extras such as GameMaker <code>.yymps</code> packages, <code>.exe</code> files, HTML demos and <code>License.txt</code> are listed but don't count as "missing".</li>
+  <li><b>Hide</b> removes purchases you'll never want from the lists. Type in the filter box to get a <b>Hide all shown</b> button for bulk hiding.</li>
+</ul>
+
+<h2 id="g-claude-connect">Connect Claude</h2>
+<p>Packrat includes an MCP server that gives Claude Code tools to search your library, view previews, read license files, and copy assets into the project you're working in. Register it once per computer; it applies to all your projects. Packrat must be running.</p>
+<div data-os="windows">
+<p>In PowerShell:</p>
+<pre class="prompt"><code>irm http://localhost:8765/install.ps1 | iex</code></pre>
+</div>
+<div data-os="linux">
+<p>In a terminal:</p>
+<pre class="prompt"><code>curl -fsSL http://localhost:8765/install.sh | sh</code></pre>
+</div>
+<p>Then restart Claude Code and type <code>/mcp</code>. You should see <b>packrat ✔ connected</b>. To remove it: <code>claude mcp remove packrat -s user</code>.</p>
+
+<h2 id="g-claude-use">Using it from Claude</h2>
+<p>Say <b>"my Packrat library"</b> in the request so Claude reaches for the Packrat tools. Claude searches, looks at contact sheets before choosing, checks licenses, and copies files into the project. It never changes the library itself.</p>
+
+<h3>Explore what you have</h3>
+<pre class="prompt"><code>What kinds of assets are in my Packrat library? Summarize by category and show me a few highlights.</code></pre>
+
+<h3>Find art that fits a project</h3>
+<pre class="prompt"><code>Look at the art already in ./assets, work out its tile size and style, then find tilesets in my Packrat library that would match it. Show me previews before copying anything.</code></pre>
+
+<h3>Specific files</h3>
+<pre class="prompt"><code>Find a treasure chest with an opening animation in my Packrat library, work out the frame size from the sprite sheet, and copy it to ./assets/sprites.</code></pre>
+
+<h3>Sound, music and fonts</h3>
+<pre class="prompt"><code>Find short UI click, hover and confirm sounds in my Packrat library that sound like they belong together, and copy them to ./audio/ui.</code></pre>
+
+<h3>Licenses and credits</h3>
+<pre class="prompt"><code>For every asset you copied from my Packrat library in this session, check the pack's license or usage terms and write a CREDITS.md listing each pack, author, link and whether attribution is required.</code></pre>
+
+<h3>Make it a habit in a project</h3>
+<p>Add a line like this to the project's <code>CLAUDE.md</code>:</p>
+<pre><code>Game art, sound, music and fonts come from my Packrat library (packrat MCP tools).
+Preview before choosing, keep the style consistent with ./assets, copy into ./assets,
+and record the license terms of anything used in CREDITS.md.</code></pre>
+
+<h2 id="g-trouble">Troubleshooting</h2>
+<dl class="trouble">
+  <dt>Claude doesn't use Packrat, or <code>/mcp</code> shows packrat as failed</dt>
+  <dd>Check that this page opens in a browser on that computer. If it does, run the command from <a href="#g-claude-connect">Connect Claude</a> again, then restart Claude Code. Say "my Packrat library" in requests.</dd>
+
+  <dt>itch.io sync fails or says the API key is missing</dt>
+  <dd>Create an API key on itch.io under <i>Settings → API keys</i> and add it to Packrat. If the key was revoked, create a new one.</dd>
+
+  <dt>.rar or .7z packs show no files</dt>
+  <dd>Packrat needs 7-Zip to read them. On Windows install 7-Zip from 7-zip.org; on Linux install <code>7zip</code> (or <code>p7zip-full</code>) from your package manager. Then press <b>Rescan</b>.</dd>
+
+  <dt>A purchase says "page no longer available"</dt>
+  <dd>The creator unlisted or removed its itch.io page. Its files still download; only the tags and terms are missing.</dd>
+</dl>
+</article>
+</div>

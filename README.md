@@ -23,6 +23,16 @@ Packrat only manages files **you** bought or downloaded. It never uploads, share
 | Platforms | Linux, Windows | macOS |
 | Stores | itch.io | Humble Bundle (experimental) |
 
+## Run from source
+
+Needs Python 3.11 or newer.
+
+```
+pip install .
+packrat serve        # web UI at http://localhost:8765
+packrat scan         # re-index the library folders
+```
+
 ## License
 
 The Packrat code is released under the [MIT License](LICENSE). This covers Packrat itself, not the assets it manages.

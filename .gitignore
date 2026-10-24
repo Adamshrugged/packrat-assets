@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Local settings, secrets and data (never commit these)
+config.toml
+secrets.toml
+data/
