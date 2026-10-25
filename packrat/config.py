@@ -94,7 +94,7 @@ def data_dir() -> str:
 
 
 def default_download_dir() -> str:
-    return os.path.join(os.path.expanduser("~"), "Packrat", "itch.io")
+    return os.environ.get("PACKRAT_DOWNLOADS") or os.path.join(os.path.expanduser("~"), "Packrat", "itch.io")
 
 
 def default_path() -> str:
@@ -142,8 +142,9 @@ def load(path: str | None = None) -> Config:
     return Config(
         roots=roots,
         data_dir=data,
-        host=srv.get("host", "127.0.0.1"),
-        port=int(srv.get("port", 8765)),
+        # Environment variables win, so a container can be set up without editing the file.
+        host=os.environ.get("PACKRAT_HOST") or srv.get("host", "127.0.0.1"),
+        port=int(os.environ.get("PACKRAT_PORT") or srv.get("port", 8765)),
         sevenzip=paths.get("sevenzip") or find_7z(),
         itch_download_dir=download_dir,
         itch_sync_hours=float(itch.get("sync_every_hours", 24)),

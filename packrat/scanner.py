@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from . import db
 from .archives import list_members
+from .config import inside
 from .kinds import KINDS, LISTABLE, ext_of, is_junk, kind_of
 
 log = logging.getLogger("packrat.scan")
@@ -63,7 +64,11 @@ def discover(cfg):
             continue
         base = os.path.normcase(root.path)
         transparent = set()
-        for c in root.containers:
+        containers = list(root.containers)
+        if cfg.itch_download_dir and inside(cfg.itch_download_dir, root.path):
+            # The download folder holds one folder per purchase: each is a pack, not the folder as a whole.
+            containers.append(os.path.relpath(cfg.itch_download_dir, root.path))
+        for c in containers:
             p = os.path.normcase(os.path.normpath(os.path.join(root.path, c)))
             while len(p) > len(base):
                 transparent.add(p)
@@ -311,9 +316,12 @@ def scan(cfg, progress=None) -> dict:
     for c in worker_conns:
         c.close()
     with conn:
-        # Packs that vanished are flagged, never deleted, so their notes/tags survive a move or a drive going offline.
+        # Packs that vanished are flagged, never deleted, so their notes/tags survive a move or a drive going
+        # offline. That includes packs of library folders removed in Settings; an unreachable folder's are kept.
         for label in reachable:
             conn.execute("UPDATE packs SET missing=1 WHERE root=? AND last_scanned < ?", (label, now))
+        labels = [r.label for r in cfg.roots]
+        conn.execute(f"UPDATE packs SET missing=1 WHERE root NOT IN ({db.placeholders(labels)})", labels)
     # Re-link store purchases to the (possibly changed) library; also refreshes pack search.
     from .itch import match
     match(cfg, conn)

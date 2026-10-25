@@ -42,7 +42,20 @@ To let Claude Code use your library (search, previews, licenses, copying assets 
 claude mcp add packrat --scope user -- packrat mcp
 ```
 
-Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. To use it from other computers (for example, running on a NAS), set `host = "0.0.0.0"` under `[server]` in `config.toml`. Other computers then sign in with a password: the first visit asks for a one-time setup code printed in Packrat's log, or run `packrat set-password`.
+Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. To use it from other computers (for example, running on a NAS), set `host = "0.0.0.0"` under `[server]` in `config.toml`. Other computers then sign in with a password. To choose it, open Packrat in a browser and enter the one-time setup code printed in Packrat's log, or run `packrat set-password`. (Behind a reverse proxy on the same machine, every visitor looks local and skips signing in, so don't set it up that way.)
+
+## Run on a NAS or home server (Docker)
+
+To keep Packrat running all the time and use it from any computer on your network, copy [compose.yml](compose.yml), change the folder paths in it, then:
+
+```
+docker compose up -d
+docker compose logs packrat     # the setup code for choosing a password
+```
+
+Open `http://<server>:8765` in a browser, enter the code, choose a password, and add `/library` in Settings. Your library is mounted read-only; Packrat never changes it.
+
+Until the first release the image isn't published yet, so build it yourself first: `docker build -t ghcr.io/adamshrugged/packrat-assets:latest .` in a copy of this repository.
 
 ## Tests
 

@@ -1,9 +1,11 @@
 """Keeps other websites out. Packrat has no login, so it must only answer requests that really come from
 this computer's browser tabs (or, if the user opts in, their own network):
 
-- Host check: a request must be addressed to localhost, a loopback IP, an IP address when Packrat listens
-  on the network, or a name listed in [server] allowed_hosts. This blocks DNS rebinding, where a web page
-  points its own domain at 127.0.0.1 to read Packrat's responses.
+- Host check: a request must be addressed to localhost, a loopback IP, or a name listed in [server]
+  allowed_hosts. This blocks DNS rebinding, where a web page points its own domain at 127.0.0.1 to read
+  Packrat's responses. When Packrat listens on the network, other computers may use any address (an IP,
+  nas.local...): they must sign in (auth.py), and their browser sends Packrat's cookie only to Packrat's
+  own address. Requests from this computer still need localhost or an IP, as they skip signing in.
 - Origin check: a request that changes something (anything but GET/HEAD/OPTIONS) must not come from
   another site's page. This blocks a page silently posting a form to Packrat."""
 import ipaddress
@@ -41,15 +43,18 @@ class HostGuard:
         self.allowed = set(allowed_hosts)
         self.on_network = not is_loopback(bind_host)
 
-    def host_ok(self, host: str) -> bool:
-        return is_loopback(host) or host in self.allowed or (self.on_network and is_ip(host))
+    def host_ok(self, host: str, client: str) -> bool:
+        if is_loopback(host) or host in self.allowed:
+            return True
+        return self.on_network and (is_ip(host) or not is_loopback(client))
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
         host_header = headers.get("host", "")
-        if not self.host_ok(hostname(host_header)):
+        client = (scope.get("client") or ("",))[0]
+        if not self.host_ok(hostname(host_header), client):
             return await reject(send, "Packrat only answers on localhost. To allow another name, "
                                       "add it to [server] allowed_hosts in config.toml.")
         origin = headers.get("origin")

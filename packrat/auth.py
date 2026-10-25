@@ -52,7 +52,7 @@ class Auth:
         self._failures: dict[str, list[float]] = {}
         if required and not self.password_set():
             self.setup_code = f"{rand.randbelow(10**8):08d}"
-            msg = (f"No password yet. Open Packrat from another computer and enter this setup code to choose one: "
+            msg = (f"No password yet. Open Packrat in a browser and enter this setup code to choose one: "
                    f"{self.setup_code[:4]}-{self.setup_code[4:]}  (or run: packrat set-password)")
             log.warning(msg)
 

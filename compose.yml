@@ -1,0 +1,29 @@
+# Packrat on a NAS or home server: always on, used from any computer on your network.
+#
+#   1. Change the paths under "volumes" to your asset library and a download folder.
+#   2. docker compose up -d
+#   3. docker compose logs packrat      (copy the setup code)
+#   4. Open http://<this machine>:8765 in a browser, enter the code and choose a password.
+#   5. In Settings, add /library (or folders inside it) as library folders.
+services:
+  packrat:
+    image: ghcr.io/adamshrugged/packrat-assets:latest
+    container_name: packrat
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    # Run as the user that owns your library files (find them with: id -u; id -g).
+    user: "1000:1000"
+    environment:
+      PACKRAT_DOWNLOADS: /library/itch.io   # the writable folder above
+    volumes:
+      # Your asset library. Read-only: Packrat never changes it.
+      - /path/to/your/assets:/library:ro
+      # Where itch.io purchases download to: one folder inside the library, mounted again with write access.
+      - /path/to/your/assets/itch.io:/library/itch.io
+      - packrat-config:/config   # settings, password, itch.io key
+      - packrat-data:/data       # database and previews
+
+volumes:
+  packrat-config:
+  packrat-data:

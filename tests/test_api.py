@@ -142,3 +142,34 @@ def test_desktop_app_endpoints(app):
     s = client.get("/api/settings").json()
     assert not s["can_quit"] and s["start_at_login"] is None  # a server (and a remote browser) gets neither
     assert client.post("/api/quit").status_code == 403
+
+
+def test_download_folder_inside_the_library(tmp_path):
+    """Each purchase in the download folder is its own pack, even when that folder is inside a library folder."""
+    from packrat.scanner import scan
+    lib = tmp_path / "lib"
+    for d in ("itch.io/Coins/coin.png", "itch.io/Swords/sword.png", "Other Pack/x.png"):
+        (lib / d).parent.mkdir(parents=True, exist_ok=True)
+        (lib / d).write_bytes(b"x")
+    (tmp_path / "c.toml").write_text(f'[paths]\ndata_dir = "{tmp_path / "data"}"\n[itch]\ndownload_dir = '
+                                     f'"{lib / "itch.io"}"\n[[roots]]\npath = "{lib}"\n')
+    cfg = config.load(str(tmp_path / "c.toml"))
+    db.init(cfg)
+    scan(cfg)
+    c = db.connect(cfg)
+    assert sorted(r[0] for r in c.execute("SELECT name FROM packs")) == ["Coins", "Other Pack", "Swords"]
+
+
+def test_removed_library_folder_packs_are_flagged_missing(app, tmp_path):
+    client, cfg = app
+    other = tmp_path / "other"
+    (other / "Extra Pack").mkdir(parents=True)
+    (other / "Extra Pack" / "e.png").write_bytes(b"x")
+    roots = [{"path": str(tmp_path / "lib")}, {"path": str(other)}]
+    client.put("/api/settings", json={"roots": roots, "itch": {}})
+    wait_idle(client, "scan")
+    assert "Extra Pack" in [p["name"] for p in client.get("/api/packs").json()]
+    client.put("/api/settings", json={"roots": roots[:1], "itch": {}})
+    wait_idle(client, "scan")
+    assert "Extra Pack" not in [p["name"] for p in client.get("/api/packs").json()]
+    assert "Extra Pack" in [p["name"] for p in client.get("/api/packs", params={"missing": True}).json()]  # kept

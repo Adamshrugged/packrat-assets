@@ -73,8 +73,8 @@ def browse(path: str | None) -> dict:
         if os.name == "nt":
             places = [home] + [f"{d}:\\" for d in string.ascii_uppercase if os.path.isdir(f"{d}:\\")]
         else:
-            places = [home, "/"] + [p for p in ("/mnt", "/media", f"/run/media/{getpass.getuser()}")
-                                    if os.path.isdir(p)]
+            places = [home, "/"] + [p for p in ("/library", "/mnt", "/media", f"/run/media/{getpass.getuser()}")
+                                    if os.path.isdir(p)]  # /library: where the Docker image mounts it
         return {"path": None, "parent": None, "dirs": [{"name": p, "path": p} for p in places]}
     path = os.path.abspath(os.path.expanduser(path))
     if not os.path.isdir(path):

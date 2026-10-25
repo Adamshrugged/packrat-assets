@@ -6,12 +6,12 @@ from fastapi.testclient import TestClient
 from packrat.guard import HostGuard
 
 
-def client(bind="127.0.0.1", allowed=()):
+def client(bind="127.0.0.1", allowed=(), address="testclient"):
     app = FastAPI()
     app.get("/x")(lambda: {"ok": True})
     app.post("/x")(lambda: {"ok": True})
     app.add_middleware(HostGuard, bind_host=bind, allowed_hosts=list(allowed))
-    return TestClient(app, base_url="http://localhost:8765")
+    return TestClient(app, base_url="http://localhost:8765", client=(address, 50000))
 
 
 @pytest.mark.parametrize("host, code", [
@@ -22,10 +22,12 @@ def test_host_local_only(host, code):
     assert client().get("/x", headers={"Host": host}).status_code == code
 
 
-@pytest.mark.parametrize("host, code", [("192.168.1.5:8765", 200), ("nas.local:8765", 200), ("evil.example:8765", 403)])
-def test_host_network_mode(host, code):
-    c = client(bind="0.0.0.0", allowed=["nas.local"])
-    assert c.get("/x", headers={"Host": host}).status_code == code
+@pytest.mark.parametrize("address, host, code", [
+    ("192.168.1.20", "192.168.1.5:8765", 200), ("192.168.1.20", "nas.local:8765", 200),  # others sign in instead
+    ("127.0.0.1", "192.168.1.5:8765", 200), ("127.0.0.1", "nas.local:8765", 403),  # this computer: rebinding
+])
+def test_host_network_mode(address, host, code):
+    assert client(bind="0.0.0.0", address=address).get("/x", headers={"Host": host}).status_code == code
 
 
 @pytest.mark.parametrize("origin, code", [
