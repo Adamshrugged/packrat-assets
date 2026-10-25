@@ -9,14 +9,9 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def command() -> list[str]:
-    """How to start Packrat in the background from outside this process."""
-    if getattr(sys, "frozen", False):  # the installed app (a bundled executable)
-        return [sys.executable, "--background"]
-    python = sys.executable
-    if os.name == "nt":  # pythonw.exe runs without a console window
-        windowless = os.path.join(os.path.dirname(python), "pythonw.exe")
-        python = windowless if os.path.exists(windowless) else python
-    return [python, "-m", "packrat", "--background"]
+    """How to start Packrat in the background: the desktop app, without opening the browser."""
+    from .program import command as program
+    return program(windowed=True) + ["--background"]
 
 
 def supported() -> bool:

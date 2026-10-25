@@ -82,3 +82,19 @@ def test_start_at_login_registry(monkeypatch):
                 winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
             except OSError:
                 pass
+
+
+def test_program_command_for_each_install(monkeypatch):
+    from packrat import program
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    assert program.command()[-2:] == ["-m", "packrat"]  # a Python install
+    monkeypatch.setenv("APPIMAGE", "/home/me/Apps/Packrat.AppImage")
+    assert program.command() == ["/home/me/Apps/Packrat.AppImage"]  # not the folder it runs from
+    monkeypatch.delenv("APPIMAGE")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", os.path.join("C:", "Apps", "Packrat", "Packrat.exe"))
+    if os.name == "nt":
+        assert program.command().pop().endswith("packrat-cli.exe")  # commands need a console
+        assert program.command(windowed=True).pop().endswith("Packrat.exe")
+    else:
+        assert program.command() == [sys.executable]

@@ -1,13 +1,12 @@
 """Settings: library folders, the itch.io key and options, and the folder picker."""
 import os
 import sqlite3
-import sys
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from .. import autostart, config, db, itch, secrets, settings
+from .. import autostart, config, db, itch, program, secrets, settings
 from ..archives import tools as archive_tools
 from ..guard import is_loopback
 from . import Context, is_local
@@ -137,8 +136,8 @@ def router(ctx: Context) -> APIRouter:
 
     @r.get("/mcp-command")
     def mcp_command():
-        """The command that registers Packrat's MCP server with Claude Code. It names this Python by full
-        path, so it works even when the packrat command isn't on PATH (a venv, or an installer)."""
-        return {"command": f'claude mcp add packrat --scope user -- "{sys.executable}" -m packrat mcp'}
+        """The command that registers Packrat's MCP server with Claude Code. It names this install's program by
+        full path, so it works even when the packrat command isn't on PATH (a venv, or the installed app)."""
+        return {"command": "claude mcp add packrat --scope user -- " + program.shell_line(program.command() + ["mcp"])}
 
     return r

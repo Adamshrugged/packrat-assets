@@ -1,0 +1,81 @@
+# Builds the Windows installer and the Linux AppImage, starts each bundled program to check it works, and
+# for a version tag (v1.2.3) attaches both to a draft GitHub release to review and publish.
+# Run it by hand from the Actions tab to just build them (downloadable from the run's page).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          python-version: "3.13"
+      - name: Bundle
+        run: |
+          uv run --with pyinstaller python packaging/make_icons.py
+          uv run --with pyinstaller pyinstaller packaging/packrat.spec --noconfirm
+      - name: Check the bundled program starts and serves
+        shell: pwsh
+        run: |
+          $env:PACKRAT_CONFIG = "$env:RUNNER_TEMP\packrat\config.toml"
+          $p = Start-Process dist\Packrat\packrat-cli.exe -ArgumentList "serve" -PassThru
+          Start-Sleep 10
+          (Invoke-WebRequest http://127.0.0.1:8765/api/ping -UseBasicParsing).Content
+          Stop-Process $p
+      - name: Installer
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { "dev" }
+          iscc /DMyVersion=$version packaging\windows\packrat.iss
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/Packrat-Setup-*.exe
+
+  linux:
+    runs-on: ubuntu-22.04  # an older system library (glibc), so the AppImage runs on older distributions too
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          python-version: "3.13"
+      - name: Bundle
+        run: |
+          uv run --with pyinstaller python packaging/make_icons.py
+          uv run --with pyinstaller pyinstaller packaging/packrat.spec --noconfirm
+      - name: AppImage
+        run: packaging/linux/build_appimage.sh
+      - name: Check the AppImage starts and serves
+        run: |
+          export PACKRAT_CONFIG="$RUNNER_TEMP/packrat/config.toml" APPIMAGE_EXTRACT_AND_RUN=1
+          dist/Packrat-x86_64.AppImage serve &
+          sleep 10
+          curl -fsS http://127.0.0.1:8765/api/ping
+          kill %1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: dist/Packrat-x86_64.AppImage
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "Packrat ${GITHUB_REF_NAME#v}"

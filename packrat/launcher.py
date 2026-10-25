@@ -32,13 +32,15 @@ def already_running(cfg) -> str:
         return ""
 
 
-def icon_image():
+def icon_image(size: int = 64):
+    """The app icon: the favicon's four squares. Also used to make the installers' icons."""
     from PIL import Image, ImageDraw
-    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(im)
+    u = size / 64
     for i, color in enumerate(COLORS):
-        x, y = (i % 2) * 34 + 2, (i // 2) * 34 + 2
-        draw.rounded_rectangle([x, y, x + 26, y + 26], radius=5, fill=color)
+        x, y = ((i % 2) * 34 + 2) * u, ((i // 2) * 34 + 2) * u
+        draw.rounded_rectangle([x, y, x + 26 * u, y + 26 * u], radius=5 * u, fill=color)
     return im
 
 

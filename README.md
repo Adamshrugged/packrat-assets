@@ -23,6 +23,15 @@ Packrat only manages files **you** bought or downloaded. It never uploads, share
 | Platforms | Linux, Windows | macOS |
 | Stores | itch.io | Humble Bundle (experimental) |
 
+## Install
+
+From the first release, download from the [Releases](https://github.com/Adamshrugged/packrat-assets/releases) page:
+
+- **Windows:** `Packrat-Setup-<version>.exe`. It installs for your user only, with no admin rights needed. Windows may warn that the app is unrecognized, since it isn't code-signed: choose *More info → Run anyway*.
+- **Linux:** `Packrat-x86_64.AppImage`. Make it executable (`chmod +x Packrat-x86_64.AppImage`) and run it.
+
+Packrat opens in your browser and adds a tray icon to reopen or quit it.
+
 ## Run from source
 
 Needs Python 3.11 or newer.
