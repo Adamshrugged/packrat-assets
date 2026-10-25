@@ -52,8 +52,8 @@ def save(cfg, roots: list[dict], itch: dict) -> None:
                  else None,
                  "sync_every_hours": float(itch.get("sync_every_hours") or 0),  # 0 = off
                  "auto_download": bool(itch.get("auto_download"))},
-        "roots": [{"label": r.get("label") or None, "path": r["path"],
-                   "display": r.get("display") or None, "containers": r.get("containers") or None}
+        "roots": [{"label": r.get("label") or None, "path": r["path"], "display": r.get("display") or None,
+                   "containers": r.get("containers") or None, "ignore": r.get("ignore") or None}
                   for r in roots],
     }
     data = {k: v for k, v in data.items() if v and (isinstance(v, list) or any(x is not None for x in v.values()))}

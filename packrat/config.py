@@ -14,7 +14,8 @@ class Root:
     path: str
     display: str
     containers: list[str]
-    auto: bool = False  # added by Packrat (the itch.io download folder), not chosen in Settings
+    auto: bool = False
+    ignore: list[str] = field(default_factory=list)  # folders inside it to leave out ('/'-separated, relative)  # added by Packrat (the itch.io download folder), not chosen in Settings
 
 
 @dataclass
@@ -124,6 +125,7 @@ def load(path: str | None = None) -> Config:
             path=p,
             display=os.path.normpath(r["display"]) if r.get("display") else p,
             containers=list(r.get("containers", [])),
+            ignore=list(r.get("ignore", [])),
         ))
 
     itch = raw.get("itch", {})

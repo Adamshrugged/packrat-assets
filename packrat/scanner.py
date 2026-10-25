@@ -41,6 +41,7 @@ class PackSpec:
     name: str
     root: str
     grp: str
+    ignored: frozenset = frozenset()  # folders inside the pack to leave out (normcase paths)
 
     @property
     def key(self) -> str:
@@ -56,24 +57,38 @@ def norm_name(name: str) -> str:
 
 # ---------------------------------------------------------------- discovery
 
+@dataclass
+class _Plan:
+    """How to walk one library folder (all paths normcase)."""
+    containers: set[str]   # folders whose children are packs as they are (e.g. one folder per purchase)
+    transparent: set[str]  # containers and the folders leading to them: walked through, never packs
+    ignored: frozenset     # folders left out of the library
+
+
+def _abs(root, rel: str) -> str:
+    return os.path.normcase(os.path.normpath(os.path.join(root.path, rel)))
+
+
 def discover(cfg):
     for root in cfg.roots:
         if not os.path.isdir(root.path):
             if not root.auto:  # the default download folder only exists after the first download
                 log.warning("root not reachable, skipping: %s", root.path)
             continue
+        containers = {_abs(root, c) for c in root.containers}
+        if root.auto:
+            containers.add(os.path.normcase(root.path))
+        elif cfg.itch_download_dir and inside(cfg.itch_download_dir, root.path):
+            # The download folder holds one folder per purchase: each is a pack, not the folder as a whole.
+            containers.add(os.path.normcase(os.path.normpath(cfg.itch_download_dir)))
         base = os.path.normcase(root.path)
         transparent = set()
-        containers = list(root.containers)
-        if cfg.itch_download_dir and inside(cfg.itch_download_dir, root.path):
-            # The download folder holds one folder per purchase: each is a pack, not the folder as a whole.
-            containers.append(os.path.relpath(cfg.itch_download_dir, root.path))
-        for c in containers:
-            p = os.path.normcase(os.path.normpath(os.path.join(root.path, c)))
+        for p in containers:
             while len(p) > len(base):
                 transparent.add(p)
                 p = os.path.dirname(p)
-        yield from _visit(root, root.path, "", transparent)
+        plan = _Plan(containers, transparent, frozenset(_abs(root, i) for i in root.ignore))
+        yield from _visit(root, root.path, "", plan)
 
 
 def _auto_container(path: str) -> bool:
@@ -87,17 +102,22 @@ def _auto_container(path: str) -> bool:
     return archives >= 3 and archives >= 0.8 * len(entries)
 
 
-def _visit(root, dirpath: str, grp: str, transparent: set[str]):
+def _visit(root, dirpath: str, grp: str, plan: _Plan):
     loose = False
+    # A folder of archives usually holds separate packs (e.g. a Music folder of zips) and is split into one
+    # pack per archive. Not inside a container, though: there each folder is one pack, e.g. one purchase.
+    split = os.path.normcase(dirpath) not in plan.containers
     for e in sorted(os.scandir(dirpath), key=lambda e: e.name.lower()):
-        if is_junk(e.name):
+        path = os.path.normcase(e.path)
+        if is_junk(e.name) or path in plan.ignored:
             continue
         if e.is_dir():
             sub = f"{grp}/{e.name}" if grp else e.name
-            if os.path.normcase(e.path) in transparent or _auto_container(e.path):
-                yield from _visit(root, e.path, sub, transparent)
+            if path in plan.transparent or (split and _auto_container(e.path)):
+                yield from _visit(root, e.path, sub, plan)
             else:
-                yield PackSpec("folder", e.path, e.name, root.label, grp)
+                ignored = frozenset(i for i in plan.ignored if inside(i, path))
+                yield PackSpec("folder", e.path, e.name, root.label, grp, ignored)
         elif ext_of(e.name) in PACK_ARCHIVES:
             yield PackSpec("archive", e.path, os.path.splitext(e.name)[0], root.label, grp)
         else:
@@ -156,7 +176,7 @@ def collect(conn, cfg, spec: PackSpec) -> list[tuple]:
                 continue
             rel = f"{rel_dir}/{e.name}" if rel_dir else e.name
             if e.is_dir():
-                if spec.kind == "folder":
+                if spec.kind == "folder" and os.path.normcase(e.path) not in spec.ignored:
                     stack.append((e.path, rel))
                 continue
             if spec.kind == "loose" and ext_of(e.name) in PACK_ARCHIVES:
@@ -322,6 +342,17 @@ def scan(cfg, progress=None) -> dict:
             conn.execute("UPDATE packs SET missing=1 WHERE root=? AND last_scanned < ?", (label, now))
         labels = [r.label for r in cfg.roots]
         conn.execute(f"UPDATE packs SET missing=1 WHERE root NOT IN ({db.placeholders(labels)})", labels)
+        # Ignored folders are left out on purpose, so their packs are removed rather than flagged missing.
+        for root in cfg.roots:
+            for rel in root.ignore:
+                folder = os.path.normpath(os.path.join(root.path, rel))
+                below = re.sub(r"([!%_])", r"!\1", folder + os.sep) + "%"  # folder names may contain % or _
+                ids = [r[0] for r in conn.execute("SELECT id FROM packs WHERE path = ? OR path LIKE ? ESCAPE '!'",
+                                                  (folder, below))]
+                if ids:
+                    conn.execute(f"DELETE FROM files_fts WHERE rowid IN (SELECT id FROM files WHERE pack_id IN "
+                                 f"({db.placeholders(ids)}))", ids)
+                    conn.execute(f"DELETE FROM packs WHERE id IN ({db.placeholders(ids)})", ids)
     # Re-link store purchases to the (possibly changed) library; also refreshes pack search.
     from .itch import match
     match(cfg, conn)

@@ -174,3 +174,67 @@ def test_removed_library_folder_packs_are_flagged_missing(app, tmp_path):
     wait_idle(client, "scan")
     assert "Extra Pack" not in [p["name"] for p in client.get("/api/packs").json()]
     assert "Extra Pack" in [p["name"] for p in client.get("/api/packs", params={"missing": True}).json()]  # kept
+
+
+def _zips(folder, names):
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        with zipfile.ZipFile(folder / f"{n}.zip", "w") as z:
+            z.writestr(f"{n}.png", b"x")
+
+
+def test_folders_of_archives(tmp_path):
+    """A folder of zips is split into packs, except a purchase's folder: that stays one pack."""
+    from packrat.scanner import scan
+    lib = tmp_path / "lib"
+    _zips(lib / "Music", ["Calm", "Battle", "Town"])                     # separate packs
+    _zips(lib / "itch.io" / "Texture Pack", ["Bricks", "Grass", "Wood"])  # one purchase
+    _zips(lib / "humble" / "Mega Bundle", ["A", "B", "C"])               # inside a listed container
+    (tmp_path / "c.toml").write_text(
+        f"[paths]\ndata_dir = {toml_str(tmp_path / 'data')}\n[itch]\ndownload_dir = {toml_str(lib / 'itch.io')}\n"
+        f"[[roots]]\npath = {toml_str(lib)}\ncontainers = ['humble']\n")
+    cfg = config.load(str(tmp_path / "c.toml"))
+    db.init(cfg)
+    scan(cfg)
+    names = sorted(r[0] for r in db.connect(cfg).execute("SELECT name FROM packs"))
+    assert names == ["Battle", "Calm", "Mega Bundle", "Texture Pack", "Town"]
+
+
+def test_ignored_folders(app, tmp_path):
+    client, _ = app
+    lib = tmp_path / "lib"
+    (lib / "backup").mkdir()
+    (lib / "backup" / "old.png").write_bytes(b"x")
+    (lib / "Dice Pack" / "drafts").mkdir()
+    (lib / "Dice Pack" / "drafts" / "draft.png").write_bytes(b"x")
+    (lib / "axb").mkdir()
+    (lib / "axb" / "keep.png").write_bytes(b"x")
+    client.post("/api/scan")
+    wait_idle(client, "scan")
+    assert {"backup", "axb"} <= {p["name"] for p in client.get("/api/packs").json()}
+
+    out = client.put("/api/settings", json={"roots": [{"path": str(lib), "ignore": ["backup", str(lib / "Dice Pack" / "drafts"), "a_b"]}], "itch": {}}).json()
+    assert out["rescan"] and out["roots"][0]["ignore"] == ["Dice Pack/drafts", "a_b", "backup"]
+    wait_idle(client, "scan")
+    names = {p["name"] for p in client.get("/api/packs").json()}
+    assert "backup" not in names and "axb" in names  # "a_b" is a name, not a pattern
+    assert "backup" not in {p["name"] for p in client.get("/api/packs", params={"missing": True}).json()}  # removed
+    assert not client.get("/api/search", params={"q": "draft"}).json()["files"]  # left out inside a pack too
+    bad = client.put("/api/settings", json={"roots": [{"path": str(lib), "ignore": [str(tmp_path)]}], "itch": {}})
+    assert bad.status_code == 400  # must be inside the library folder
+
+
+def test_folder_of_packs_from_settings(app, tmp_path):
+    client, _ = app
+    lib = tmp_path / "lib"
+    for d in ("Bundle/Castle/tiles", "Bundle/Forest/tiles"):
+        (lib / d).mkdir(parents=True)
+        (lib / d / "t.png").write_bytes(b"x")
+    client.post("/api/scan")
+    wait_idle(client, "scan")
+    assert "Bundle" in {p["name"] for p in client.get("/api/packs").json()}  # one big pack at first
+    out = client.put("/api/settings", json={"roots": [{"path": str(lib), "containers": [str(lib / "Bundle")]}], "itch": {}}).json()
+    assert out["rescan"] and out["roots"][0]["containers"] == ["Bundle"]
+    wait_idle(client, "scan")
+    names = {p["name"] for p in client.get("/api/packs").json()}
+    assert {"Castle", "Forest"} <= names and "Bundle" not in names

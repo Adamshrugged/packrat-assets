@@ -1022,7 +1022,9 @@ function pickFolder(start) {
 async function viewSettings(seq) {
   const s = await api('/api/settings');
   if (seq !== routeSeq) return;
-  const roots = s.roots.map((r) => ({ ...r }));
+  const roots = s.roots.map((r) => ({ ...r, containers: [...r.containers], ignore: [...r.ignore] }));
+  // Per library folder: folders whose subfolders are each a pack, and folders to leave out.
+  const LISTS = { containers: 'Folders of packs', ignore: 'Ignored' };
   const it = s.itch;
   const keyBlock = it.has_key
     ? `<p>Connected${it.user ? ` as <b>${esc(it.user)}</b>` : ''}. <button type="button" class="btn small" id="key-remove">Remove key</button></p>`
@@ -1035,7 +1037,7 @@ async function viewSettings(seq) {
     ${s.first_run ? `<p class="lead">Add your asset folders to start.</p>` : ''}
     <form id="settings-form">
       <section class="panel">
-        <h3>Library folders ${info('Each folder or zip/rar inside is one pack.')}</h3>
+        <h3>Library folders ${info('Each folder or zip/rar inside is one pack. In a folder of packs (e.g. a bundle), each folder in it is one. Ignored folders, like backups, are left out.')}</h3>
         <div id="roots" class="roots"></div>
         <button type="button" class="btn" id="root-add">Add folder…</button>
       </section>
@@ -1095,15 +1097,39 @@ async function viewSettings(seq) {
   const renderRoots = () => {
     $('#roots').innerHTML = roots.length
       ? roots.map((r, i) => `<div class="root">${icon('folder')}<code>${esc(r.path)}</code>
-          <button type="button" class="btn small" data-remove="${i}">Remove</button></div>`).join('')
+          <button type="button" class="btn small" data-add-to="containers:${i}" title="A folder holding pack folders, e.g. a bundle: each folder in it becomes a pack">Folder of packs…</button>
+          <button type="button" class="btn small" data-add-to="ignore:${i}" title="Leave a folder out, e.g. backups">Ignore a folder…</button>
+          <button type="button" class="btn small" data-remove="${i}">Remove</button></div>
+        ${Object.entries(LISTS).filter(([k]) => r[k].length).map(([k, label]) => `<div class="ignored">${label}: ${r[k].map((x, j) =>
+          `<span class="chip">${esc(x)}<button type="button" data-drop="${k}:${i}:${j}" aria-label="Remove ${esc(x)}">×</button></span>`).join('')}</div>`).join('')}`).join('')
       : '<p class="warn">No folders yet.</p>';
     $$('[data-remove]').forEach((b) => { b.onclick = () => { roots.splice(+b.dataset.remove, 1); renderRoots(); }; });
+    $$('[data-add-to]').forEach((b) => {
+      b.onclick = async () => {
+        const [list, i] = b.dataset.addTo.split(':');
+        const r = roots[+i];
+        const path = await pickFolder(r.path);
+        if (!path) return;
+        const rest = path.slice(r.path.length);
+        if (!path.startsWith(r.path) || !/^[\\/]./.test(rest)) { toast('Choose a folder inside this library folder'); return; }
+        const rel = rest.replace(/^[\\/]+/, '').replaceAll('\\', '/');
+        if (!r[list].includes(rel)) r[list].push(rel);
+        renderRoots();
+      };
+    });
+    $$('[data-drop]').forEach((b) => {
+      b.onclick = () => {
+        const [list, i, j] = b.dataset.drop.split(':');
+        roots[+i][list].splice(+j, 1);
+        renderRoots();
+      };
+    });
   };
   renderRoots();
 
   $('#root-add').onclick = async () => {
     const path = await pickFolder(roots.at(-1)?.path);
-    if (path && !roots.some((r) => r.path === path)) { roots.push({ path, containers: [] }); renderRoots(); }
+    if (path && !roots.some((r) => r.path === path)) { roots.push({ path, containers: [], ignore: [] }); renderRoots(); }
   };
   $('#dl-pick').onclick = async () => {
     const path = await pickFolder($('#dl').value.trim() || null);

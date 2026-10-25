@@ -17,6 +17,7 @@ class RootIn(BaseModel):
     label: str | None = None
     display: str | None = None
     containers: list[str] = []
+    ignore: list[str] = []  # folders inside it to leave out, absolute or relative to it
 
 
 class ItchIn(BaseModel):
@@ -44,7 +45,7 @@ def router(ctx: Context) -> APIRouter:
         return {
             "first_run": not os.path.exists(cfg.source),
             "roots": [{"label": x.label, "path": x.path, "display": x.display if x.display != x.path else None,
-                       "containers": x.containers} for x in cfg.roots if not x.auto],
+                       "containers": x.containers, "ignore": x.ignore} for x in cfg.roots if not x.auto],
             "itch": {"download_dir": cfg.itch_download_dir, "sync_every_hours": cfg.itch_sync_hours,
                      "auto_download": cfg.itch_auto_download, "has_key": bool(secrets.itch_key()),
                      "user": db.get_kv(c, "itch_user")},
@@ -66,6 +67,16 @@ def router(ctx: Context) -> APIRouter:
     def get_settings(request: Request, c: sqlite3.Connection = conn):
         return settings_out(c, request)
 
+    def inner_folders(root: str, folders: list[str]) -> list[str]:
+        """Folders inside a library folder (absolute or relative to it), as sorted '/'-separated relative paths."""
+        out = set()
+        for f in folders:
+            full = os.path.normpath(os.path.join(root, os.path.expanduser(f.strip())))
+            if not config.inside(full, root) or os.path.normcase(full) == os.path.normcase(root):
+                raise HTTPException(400, f"choose a folder inside {root}: {f}")
+            out.add(os.path.relpath(full, root).replace(os.sep, "/"))
+        return sorted(out)
+
     @r.put("/settings")
     def put_settings(req: SettingsIn, request: Request, c: sqlite3.Connection = conn):
         roots, seen = [], set()
@@ -73,9 +84,11 @@ def router(ctx: Context) -> APIRouter:
             path = os.path.normpath(os.path.expanduser(x.path.strip()))
             if not os.path.isdir(path):
                 raise HTTPException(400, f"library folder not found: {path}")
-            if os.path.normcase(path) not in seen:
-                seen.add(os.path.normcase(path))
-                roots.append({**x.model_dump(), "path": path})
+            if os.path.normcase(path) in seen:
+                continue
+            seen.add(os.path.normcase(path))
+            roots.append({**x.model_dump(), "path": path,
+                          "containers": inner_folders(path, x.containers), "ignore": inner_folders(path, x.ignore)})
         download_dir = os.path.normpath(os.path.expanduser((req.itch.download_dir or "").strip()
                                                            or config.default_download_dir()))
         try:
@@ -87,9 +100,9 @@ def router(ctx: Context) -> APIRouter:
             raise HTTPException(400, "sync interval can't be negative")
         if req.start_at_login is not None and is_local(request) and autostart.supported():
             autostart.set_enabled(req.start_at_login)
-        old_roots = [x.path for x in cfg.roots]
+        old_roots = [(x.path, x.containers, x.ignore) for x in cfg.roots]
         settings.save(cfg, roots, {**req.itch.model_dump(), "download_dir": download_dir})
-        rescan = [x.path for x in cfg.roots] != old_roots
+        rescan = [(x.path, x.containers, x.ignore) for x in cfg.roots] != old_roots
         if rescan:
             ctx.start_scan("scanning library folders…")
         return {**settings_out(c, request), "rescan": rescan}
