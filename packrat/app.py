@@ -515,6 +515,16 @@ def create_app(cfg) -> FastAPI:
             r["library"] = states.get(r["game_id"])
         return results
 
+    @app.get("/api/itch/tag")
+    def itch_tag(tag: str, page: int = 1):
+        """Free itch.io assets with a tag, a page at a time."""
+        from .itch import browse_free_tag
+        data = itch_call(browse_free_tag, tag, page)
+        states = itch_states(conn(), [r["game_id"] for r in data["results"]])
+        for r in data["results"]:
+            r["library"] = states.get(r["game_id"])
+        return data
+
     @app.get("/api/itch/lookup")
     def itch_lookup(url: str):
         from .itch import lookup

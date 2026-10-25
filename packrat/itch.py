@@ -255,6 +255,7 @@ def migrate(conn) -> None:
 
 PAGE_RE = re.compile(r"^(?:https?://)?([a-z0-9][a-z0-9-]*)\.itch\.io/([a-z0-9][a-z0-9_-]*)/?(?:[?#].*)?$", re.I)
 SEARCH_URL = "https://itch.io/search?type=games&classification=assets&q="
+FREE_TAG_URL = "https://itch.io/game-assets/free/tag-"
 
 
 def page_url(url: str) -> str:
@@ -348,12 +349,36 @@ def search(query: str) -> list[dict]:
     query = (query or "").strip()
     if not query:
         return []
-    req = urllib.request.Request(SEARCH_URL + urllib.parse.quote_plus(query), headers={"User-Agent": UA})
+    return parse_cells(_fetch_public(SEARCH_URL + urllib.parse.quote_plus(query)))
+
+
+def tag_slug(text: str) -> str:
+    """'Pixel Art' -> 'pixel-art', the form itch.io uses in tag page links."""
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def browse_free_tag(tag: str, page: int = 1) -> dict:
+    """One page (36 assets) of itch.io's free game assets with this tag, most popular first. Unlike search,
+    these pages go on: ask for the next page until `more` is false."""
+    slug = tag_slug(tag)
+    if not slug:
+        return {"tag": "", "results": [], "more": False}
+    data = json.loads(_fetch_public(f"{FREE_TAG_URL}{slug}?page={max(1, page)}&format=json"))
+    results = parse_cells(data.get("content") or "")
+    return {"tag": slug, "results": results, "more": len(results) >= 36}
+
+
+def _fetch_public(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            body = r.read().decode("utf-8", "replace")
+            return r.read().decode("utf-8", "replace")
     except (urllib.error.URLError, TimeoutError) as e:
-        raise ItchError(f"itch.io search failed: {e}") from None
+        raise ItchError(f"itch.io didn't respond: {e}") from None
+
+
+def parse_cells(body: str) -> list[dict]:
+    """The asset cells of an itch.io search or browse page."""
     out = []
     for cell in re.split(r'(?=<div[^>]+class="game_cell\b)', body)[1:]:
         gid = re.search(r'data-game_id="(\d+)"', cell)

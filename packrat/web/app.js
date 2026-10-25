@@ -689,9 +689,10 @@ async function viewItchSearch(seq, q) {
     </section></div>`;
   if (!q) { $('#q').focus(); return; }
 
+  const lookup = ITCH_PAGE.test(q);
   let results;
   try {
-    results = ITCH_PAGE.test(q)
+    results = lookup
       ? [await api('/api/itch/lookup?' + new URLSearchParams({ url: q }))]
       : await api('/api/itch/search?' + new URLSearchParams({ q }));
   } catch (e) {
@@ -699,11 +700,11 @@ async function viewItchSearch(seq, q) {
     return;
   }
   if (seq !== routeSeq) return;
-  if (!results.length) {
-    $('#itch-results').innerHTML = `<div class="empty">No assets found for “${esc(q)}”.</div>`;
-    return;
-  }
-  // itch.io search can't filter by price, so Free only and Refine filter the results here.
+
+  // itch.io search returns one page (about 54). More continues with itch.io's free assets tagged with the
+  // query, which do page. Free only and Refine filter everything loaded, here in the page.
+  const slug = lookup ? '' : q.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const tag = { results: [], page: 0, more: !!slug, loading: false };
   $('#itch-results').insertAdjacentHTML('beforebegin', `<div class="refine">
       <input id="refine" type="search" placeholder="Refine results" autocomplete="off">
       <label class="check"><input type="checkbox" id="free-only" ${storedFreeOnly() ? 'checked' : ''}> Free only</label>
@@ -713,12 +714,35 @@ async function viewItchSearch(seq, q) {
   const render = () => {
     const words = $('#refine').value.toLowerCase().split(/\s+/).filter(Boolean);
     const freeOnly = $('#free-only').checked;
-    const shown = results.filter((r) => (!freeOnly || isFree(r) || r.library)
-      && words.every((w) => [r.title, r.author, r.short_text].join(' ').toLowerCase().includes(w)));
-    $('#refine-count').textContent = shown.length === results.length ? plural(results.length, 'result') : `${shown.length} of ${results.length}`;
-    $('#itch-results').innerHTML = shown.length ? shown.map(itchResult).join('')
-      : '<div class="empty">Nothing matches. Clear the filters to see all results.</div>';
+    const keep = (r) => (!freeOnly || isFree(r) || r.library)
+      && words.every((w) => [r.title, r.author, r.short_text].join(' ').toLowerCase().includes(w));
+    const shown = results.filter(keep);
+    const shownTag = tag.results.filter(keep);
+    const total = results.length + tag.results.length;
+    const count = shown.length + shownTag.length;
+    $('#refine-count').textContent = count === total ? plural(total, 'result') : `${count} of ${total}`;
+    const moreLabel = tag.loading ? 'Loading…' : tag.page ? 'More' : `More: free assets tagged “${slug}”`;
+    $('#itch-results').innerHTML = (shown.length ? shown.map(itchResult).join('')
+      : `<div class="empty">${results.length ? 'Nothing matches. Clear the filters to see all results.' : `No search results for “${esc(q)}”.`}</div>`)
+      + (tag.page ? `<h3 class="section-title">Free assets tagged “${esc(slug)}” ${info('From itch.io’s tag pages, most popular first. Tags are set by creators, so this can differ from search.')}</h3>
+          ${shownTag.length ? shownTag.map(itchResult).join('') : `<div class="empty">${tag.results.length ? 'Nothing matches the filters.' : `No free assets are tagged “${esc(slug)}” on itch.io.`}</div>`}` : '')
+      + (tag.more ? `<div class="more"><button class="btn" id="itch-more" ${tag.loading ? 'disabled' : ''}>${esc(moreLabel)}</button></div>` : '');
     trackActivity();
+  };
+  const loadMore = async () => {
+    tag.loading = true;
+    render();
+    try {
+      const data = await api('/api/itch/tag?' + new URLSearchParams({ tag: slug, page: tag.page + 1 }));
+      const seen = new Set([...results, ...tag.results].map((r) => r.game_id));
+      tag.results.push(...data.results.filter((r) => !seen.has(r.game_id)));
+      tag.page += 1;
+      tag.more = data.more;
+    } catch (e) {
+      toast(e.message);
+    }
+    tag.loading = false;
+    if (seq === routeSeq) render();
   };
   $('#refine').oninput = render;
   $('#free-only').onchange = () => {
@@ -728,6 +752,7 @@ async function viewItchSearch(seq, q) {
   render();
 
   $('#itch-results').onclick = async (e) => {
+    if (e.target.closest('#itch-more')) return loadMore();
     const add = e.target.closest('[data-add-url]');
     const dl = e.target.closest('[data-dl-item]');
     if (!add && !dl) return;
@@ -745,6 +770,9 @@ async function viewItchSearch(seq, q) {
         if (r.download === 'none') { toast(`Added ${r.title}`); route(); return; }
         itemId = r.item_id;
       }
+      // Remember it's downloading, so filtering (which redraws the list) keeps showing progress.
+      const res = [...results, ...tag.results].find((x) => (add ? x.url === add.dataset.addUrl : x.library?.item_id === itemId));
+      if (res) res.library = { ...(res.library || {}), item_id: itemId, status: 'missing', downloading: 'queued' };
       btn.dataset.progressItem = itemId;  // trackActivity shows progress here, then re-renders with "Open pack"
       trackActivity();
     } catch (err) {
