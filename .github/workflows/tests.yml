@@ -22,10 +22,13 @@ jobs:
         python: ["3.11", "3.13"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: ${{ matrix.python }}
+      - name: bsdtar (for the .rar fallback test; Windows has it as tar.exe)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y --no-install-recommends libarchive-tools
       - name: Lint
         run: uvx pyflakes packrat tests
       - name: Tests
@@ -35,7 +38,7 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
       - name: itch.io pages still parse
         run: uv run pytest -m live

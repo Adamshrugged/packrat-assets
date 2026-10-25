@@ -1,5 +1,4 @@
 """Listing and reading archives without extracting them."""
-import shutil
 import subprocess
 import zipfile
 
@@ -28,13 +27,13 @@ def test_bsdtar_pattern(member, pattern):
     assert archives._bsdtar_pattern(member) == pattern
 
 
-@pytest.mark.skipif(not shutil.which("bsdtar"), reason="needs bsdtar")
+@pytest.mark.skipif(not archives._find("bsdtar"), reason="needs bsdtar")
 def test_falls_back_when_7zip_fails(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     (src / "tile [1].png").write_bytes(b"tile")
     target = str(tmp_path / "pack.tar")
-    subprocess.run(["bsdtar", "-cf", target, "-C", str(src), "tile [1].png"], check=True)
+    subprocess.run([archives._find("bsdtar"), "-cf", target, "-C", str(src), "tile [1].png"], check=True)
     # a 7-Zip that can't open the file (like Fedora's with RAR) must not stop the other tools
     archives._worked.clear()
     assert [m[0] for m in archives.list_members(target, "/nonexistent/7z")] == ["tile [1].png"]

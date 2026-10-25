@@ -61,3 +61,24 @@ def test_start_at_login_file(tmp_path, monkeypatch):
     assert autostart.enabled()
     autostart.set_enabled(False)
     assert not autostart.enabled()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows Run registry value")
+def test_start_at_login_registry(monkeypatch):
+    import winreg
+    from packrat import autostart
+    monkeypatch.setattr(autostart, "RUN_KEY", r"Software\PackratTest\Run")  # not the real Run key
+    try:
+        assert not autostart.enabled()
+        autostart.set_enabled(True)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, autostart.RUN_KEY) as key:
+            value = winreg.QueryValueEx(key, "Packrat")[0]
+        assert value.endswith("-m packrat --background") and autostart.enabled()
+        autostart.set_enabled(False)
+        assert not autostart.enabled()
+    finally:
+        for sub in (r"Software\PackratTest\Run", r"Software\PackratTest"):
+            try:
+                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
+            except OSError:
+                pass

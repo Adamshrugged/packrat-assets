@@ -51,7 +51,7 @@ def set_enabled(on: bool) -> None:
     if os.name == "nt":
         import subprocess
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
             if on:
                 winreg.SetValueEx(key, NAME, 0, winreg.REG_SZ, subprocess.list2cmdline(command()))
             else:
