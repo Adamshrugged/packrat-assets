@@ -1051,7 +1051,14 @@ async function viewSettings(seq) {
         <label class="check"><input type="checkbox" id="auto" ${it.auto_download ? 'checked' : ''}> Download new purchases after each sync</label>
       </section>
 
-      <div class="save"><button class="btn primary" id="save">${s.first_run ? 'Save and scan' : 'Save'}</button><span id="save-status" class="dim"></span></div>
+      ${s.start_at_login !== null ? `<section class="panel">
+        <h3>Packrat</h3>
+        <label class="check"><input type="checkbox" id="login" ${s.start_at_login ? 'checked' : ''}> Start when I log in
+          ${info('Starts in the background with a tray icon, so scheduled syncs run without opening Packrat.')}</label>
+      </section>` : ''}
+
+      <div class="save"><button class="btn primary" id="save">${s.first_run ? 'Save and scan' : 'Save'}</button><span id="save-status" class="dim"></span>
+        ${s.can_quit ? '<span class="grow"></span><button type="button" class="btn" id="quit" title="Stop Packrat. Open it again from your apps menu.">Quit Packrat</button>' : ''}</div>
     </form>
 
     <section class="panel about">
@@ -1111,6 +1118,16 @@ async function viewSettings(seq) {
   };
   bindKey();
 
+  const quit = $('#quit');
+  if (quit) {
+    quit.onclick = async () => {
+      if (!confirm('Quit Packrat? Downloads and syncs stop until you open it again.')) return;
+      await api('/api/quit', { method: 'POST' }).catch((e) => toast(e.message));
+      clearTimeout(activityTimer);
+      view.innerHTML = '<div class="empty"><h2>Packrat has quit</h2><p>You can close this tab.</p></div>';
+    };
+  }
+
   $('#settings-form').onsubmit = async (e) => {
     e.preventDefault();
     const btn = $('#save');
@@ -1121,6 +1138,7 @@ async function viewSettings(seq) {
         body: JSON.stringify({
           roots,
           itch: { download_dir: $('#dl').value.trim() || null, sync_every_hours: +$('#hours').value, auto_download: $('#auto').checked },
+          start_at_login: $('#login') ? $('#login').checked : null,
         }),
       });
       $('#save-status').textContent = r.rescan ? 'Saved. Scanning…' : 'Saved';

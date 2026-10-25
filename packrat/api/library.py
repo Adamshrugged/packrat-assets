@@ -305,6 +305,11 @@ def router(ctx: Context) -> APIRouter:
 
     # ------------------------------------------------------------ background work
 
+    @r.get("/ping")
+    def ping():
+        """Lets a second launch find the running Packrat (and tell it apart from other programs)."""
+        return {"app": "packrat"}
+
     @r.post("/scan")
     def start_scan():
         return ctx.start_scan()

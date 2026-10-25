@@ -15,9 +15,10 @@ from .guard import HostGuard
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
 
-def create_app(cfg) -> FastAPI:
+def create_app(cfg, quit=None) -> FastAPI:
+    """quit: set by the desktop app (launcher.py) so Settings can offer Quit; None for `packrat serve`."""
     db.init(cfg)
-    ctx = Context(cfg)
+    ctx = Context(cfg, quit)
     app = FastAPI(title="Packrat")
     for module in (library, store, settings):
         app.include_router(module.router(ctx))

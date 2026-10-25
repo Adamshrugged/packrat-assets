@@ -8,9 +8,12 @@ from . import config, db
 def main() -> None:
     ap = argparse.ArgumentParser(prog="packrat", description="Packrat: a library for your game assets")
     ap.add_argument("--config", help="path to config.toml")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("scan", help="index the asset roots")
-    sub.add_parser("serve", help="run the web UI")
+    ap.add_argument("--background", action="store_true", help="start without opening the browser (start at login)")
+    sub = ap.add_subparsers(dest="cmd", metavar="command",
+                            description="With no command, Packrat starts as a desktop app: it opens in your "
+                                        "browser and adds a tray icon to reopen or quit it.")
+    sub.add_parser("scan", help="index the library folders")
+    sub.add_parser("serve", help="run as a server only (no browser, no tray icon), e.g. on a NAS")
     it = sub.add_parser("itch-sync", help="import itch.io purchases and match them to the library")
     it.add_argument("--force", action="store_true", help="re-fetch file lists and page info for everything")
     th = sub.add_parser("thumbs", help="pre-generate thumbnails")
@@ -32,7 +35,11 @@ def main() -> None:
     cfg = config.load(args.config)
     db.init(cfg)
 
-    if args.cmd == "scan":
+    if args.cmd is None:
+        from .launcher import run
+        run(cfg, open_browser=not args.background)
+
+    elif args.cmd == "scan":
         from .scanner import scan
 
         def progress(i, n, name):

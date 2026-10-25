@@ -13,8 +13,9 @@ from ..jobs import Downloads, Jobs
 class Context:
     """What the routers share: the settings, the database and the background jobs."""
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, quit=None):
         self.cfg = cfg
+        self.quit = quit  # stops the desktop app; None when run as a server
         self.jobs = Jobs()
         self.downloads = Downloads(cfg, self.jobs)
 

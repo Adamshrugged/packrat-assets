@@ -1,5 +1,6 @@
 """Settings files, default folders and file names."""
 import os
+import sys
 import tomllib
 
 import pytest
@@ -44,3 +45,17 @@ def test_download_folder_inside_a_root_is_not_added_twice(tmp_path):
 ])
 def test_safe_name(name, safe):
     assert safe_name(name) == safe
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux autostart file")
+def test_start_at_login_file(tmp_path, monkeypatch):
+    from packrat import autostart
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(autostart, "command", lambda: ["/opt/my apps/python", "-m", "packrat", "--background"])
+    assert not autostart.enabled()
+    autostart.set_enabled(True)
+    text = (tmp_path / "autostart" / "packrat.desktop").read_text()
+    assert 'Exec="/opt/my apps/python" -m packrat --background' in text
+    assert autostart.enabled()
+    autostart.set_enabled(False)
+    assert not autostart.enabled()

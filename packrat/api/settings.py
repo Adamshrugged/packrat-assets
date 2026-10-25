@@ -2,11 +2,12 @@
 import os
 import sqlite3
 import sys
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from .. import config, db, itch, secrets, settings
+from .. import autostart, config, db, itch, secrets, settings
 from ..archives import tools as archive_tools
 from ..guard import is_loopback
 from . import Context, is_local
@@ -28,6 +29,7 @@ class ItchIn(BaseModel):
 class SettingsIn(BaseModel):
     roots: list[RootIn]
     itch: ItchIn
+    start_at_login: bool | None = None
 
 
 class KeyIn(BaseModel):
@@ -50,6 +52,9 @@ def router(ctx: Context) -> APIRouter:
             "config_path": cfg.source, "data_dir": cfg.data_dir, "archive_tools": list(archive_tools(cfg.sevenzip)),
             "on_network": not is_loopback(cfg.host),
             "can_reveal": is_local(request),
+            # Desktop-app options, for a browser on the same computer only
+            "start_at_login": autostart.enabled() if is_local(request) and autostart.supported() else None,
+            "can_quit": ctx.quit is not None and is_local(request),
         }
 
     @r.get("/settings")
@@ -75,6 +80,8 @@ def router(ctx: Context) -> APIRouter:
             raise HTTPException(400, f"can't create the download folder: {e.strerror}") from None
         if req.itch.sync_every_hours < 0:
             raise HTTPException(400, "sync interval can't be negative")
+        if req.start_at_login is not None and is_local(request) and autostart.supported():
+            autostart.set_enabled(req.start_at_login)
         old_roots = [x.path for x in cfg.roots]
         settings.save(cfg, roots, {**req.itch.model_dump(), "download_dir": download_dir})
         rescan = [x.path for x in cfg.roots] != old_roots
@@ -105,6 +112,14 @@ def router(ctx: Context) -> APIRouter:
         with c:
             c.execute("DELETE FROM kv WHERE key='itch_user'")
         return settings_out(c, request)
+
+    @r.post("/quit")
+    def quit_app(request: Request):
+        """Quit the desktop app (also in its tray menu). Answers first, then stops."""
+        if ctx.quit is None or not is_local(request):
+            raise HTTPException(403, "only the desktop app on this computer can be quit from here")
+        threading.Timer(0.3, ctx.quit).start()
+        return {"ok": True}
 
     @r.get("/browse")
     def browse(path: str = ""):

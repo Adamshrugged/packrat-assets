@@ -359,6 +359,7 @@ a.chip:hover { background: var(--accent); color: var(--accent-text); }
 .settings .inline input { flex: 1; min-width: 0; }
 .settings select { padding: 6px 9px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); }
 .settings .save { display: flex; gap: 12px; align-items: center; margin-bottom: 24px; }
+.settings .save .grow { flex: 1; }
 .settings code { padding: 2px 6px; border-radius: 5px; background: var(--panel-2); word-break: break-all; font-size: 12.5px; }
 .settings .about .kv dd { text-align: left; }
 .roots { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }

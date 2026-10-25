@@ -134,3 +134,11 @@ def test_same_named_folders_get_distinct_labels(tmp_path):
     (tmp_path / "c.toml").write_text(f'[[roots]]\npath = "{tmp_path / "a/assets"}"\n[[roots]]\npath = "{tmp_path / "b/assets"}"\n')
     labels = [r.label for r in config.load(str(tmp_path / "c.toml")).roots if not r.auto]
     assert labels == ["assets", "assets (2)"]
+
+
+def test_desktop_app_endpoints(app):
+    client, _ = app
+    assert client.get("/api/ping").json() == {"app": "packrat"}  # how a second launch finds this one
+    s = client.get("/api/settings").json()
+    assert not s["can_quit"] and s["start_at_login"] is None  # a server (and a remote browser) gets neither
+    assert client.post("/api/quit").status_code == 403

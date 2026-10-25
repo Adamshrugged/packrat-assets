@@ -29,7 +29,8 @@ Needs Python 3.11 or newer.
 
 ```
 pip install .
-packrat serve        # web UI at http://localhost:8765
+packrat              # desktop app: opens in your browser, with a tray icon to reopen or quit it
+packrat serve        # server only (no browser, no tray), e.g. always on: http://localhost:8765
 packrat scan         # re-index the library folders
 ```
 

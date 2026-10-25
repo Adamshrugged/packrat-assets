@@ -15,6 +15,8 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pillow>=10",
     "platformdirs>=4",
+    "pystray>=0.19; sys_platform != 'linux'",  # tray icon on Windows and macOS
+    "jeepney>=0.8; sys_platform == 'linux'",   # tray icon on Linux (D-Bus)
     "mcp>=2.3",
 ]
 
