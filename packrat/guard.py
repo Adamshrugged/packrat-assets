@@ -50,12 +50,12 @@ class HostGuard:
         headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
         host_header = headers.get("host", "")
         if not self.host_ok(hostname(host_header)):
-            return await reject(send, "Packrat only answers requests addressed to localhost. "
-                                      "To use another name, add it to [server] allowed_hosts in config.toml.")
+            return await reject(send, "Packrat only answers on localhost. To allow another name, "
+                                      "add it to [server] allowed_hosts in config.toml.")
         origin = headers.get("origin")
         if scope["method"] not in SAFE_METHODS and origin is not None:
             if origin == "null" or urlsplit(origin).netloc.lower() != host_header.lower():
-                return await reject(send, "Request from another website blocked.")
+                return await reject(send, "Blocked: request from another website.")
         await self.app(scope, receive, send)
 
 

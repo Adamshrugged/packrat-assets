@@ -5,12 +5,15 @@ import tomllib
 from .config import default_path
 
 
-def load() -> dict:
-    path = os.environ.get("PACKRAT_SECRETS",
+def path() -> str:
+    return os.environ.get("PACKRAT_SECRETS",
                           os.path.join(os.path.dirname(os.path.abspath(default_path())), "secrets.toml"))
-    if not os.path.exists(path):
+
+
+def load() -> dict:
+    if not os.path.exists(path()):
         return {}
-    with open(path, "rb") as f:
+    with open(path(), "rb") as f:
         return tomllib.load(f)
 
 

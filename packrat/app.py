@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import db
-from .guard import HostGuard
+from .guard import HostGuard, is_loopback
 from .archives import read_member
 from .kinds import THUMBABLE
 from .thumbs import get_thumb
@@ -82,7 +82,7 @@ def create_app(cfg) -> FastAPI:
     def get_file(c, file_id: int):
         row = c.execute("SELECT * FROM files WHERE id=?", (file_id,)).fetchone()
         if row is None:
-            raise HTTPException(404, "file not found (the catalog may have been rescanned)")
+            raise HTTPException(404, "file not found (try reloading)")
         return row
 
     def is_local(request: Request) -> bool:
@@ -263,7 +263,7 @@ def create_app(cfg) -> FastAPI:
         row = conn().execute("SELECT f.*, p.name AS pack_name FROM files f JOIN packs p ON p.id = f.pack_id "
                              "WHERE f.id=?", (file_id,)).fetchone()
         if row is None:
-            raise HTTPException(404, "file not found (the catalog may have been rescanned)")
+            raise HTTPException(404, "file not found (try reloading)")
         return file_out(row)
 
     @app.get("/api/files/{file_id}/raw")
@@ -298,7 +298,7 @@ def create_app(cfg) -> FastAPI:
     def reveal(request: Request, file_id: int | None = None, pack_id: int | None = None):
         """Open Explorer at the item. Only for a browser on the machine running the server."""
         if not is_local(request):
-            raise HTTPException(403, "reveal only works on the machine running the catalog")
+            raise HTTPException(403, "only works on the computer running Packrat")
         c = conn()
         if file_id is not None:
             target, select = get_file(c, file_id)["path"], True
@@ -564,6 +564,107 @@ def create_app(cfg) -> FastAPI:
     def start_store_sync():
         from .itch import sync_and_auto_download
         return start_job("itch", lambda p: sync_and_auto_download(cfg, p), "fetching purchases…")
+
+    # ------------------------------------------------------------ settings
+
+    from . import settings as settings_mod
+
+    def settings_out() -> dict:
+        from . import secrets as secrets_mod
+        return {
+            "first_run": not os.path.exists(cfg.source),
+            "roots": [{"label": r.label, "path": r.path, "display": r.display if r.display != r.path else None,
+                       "containers": r.containers} for r in cfg.roots if not r.auto],
+            "itch": {"download_dir": cfg.itch_download_dir, "sync_every_hours": cfg.itch_sync_hours,
+                     "auto_download": cfg.itch_auto_download,
+                     "has_key": bool(secrets_mod.load().get("itch_api_key")),
+                     "user": db.get_kv(conn(), "itch_user")},
+            "config_path": cfg.source, "data_dir": cfg.data_dir, "sevenzip": cfg.sevenzip,
+            "default_download_dir": os.path.join(os.path.expanduser("~"), "Packrat", "itch.io"),
+            "on_network": not is_loopback(cfg.host),
+        }
+
+    class RootIn(BaseModel):
+        path: str
+        label: str | None = None
+        display: str | None = None
+        containers: list[str] = []
+
+    class ItchIn(BaseModel):
+        download_dir: str | None = None
+        sync_every_hours: float = 0
+        auto_download: bool = False
+
+    class SettingsIn(BaseModel):
+        roots: list[RootIn]
+        itch: ItchIn
+
+    @app.get("/api/settings")
+    def get_settings():
+        return settings_out()
+
+    @app.put("/api/settings")
+    def put_settings(req: SettingsIn):
+        roots, seen = [], set()
+        for r in req.roots:
+            path = os.path.normpath(os.path.expanduser(r.path.strip()))
+            if not os.path.isdir(path):
+                raise HTTPException(400, f"library folder not found: {path}")
+            if os.path.normcase(path) not in seen:
+                seen.add(os.path.normcase(path))
+                roots.append({**r.model_dump(), "path": path})
+        download_dir = req.itch.download_dir and os.path.normpath(os.path.expanduser(req.itch.download_dir.strip()))
+        if download_dir:
+            try:
+                os.makedirs(download_dir, exist_ok=True)
+            except OSError as e:
+                raise HTTPException(400, f"can't create the download folder: {e.strerror}") from None
+        if req.itch.sync_every_hours < 0:
+            raise HTTPException(400, "sync interval can't be negative")
+        old_roots = [r.path for r in cfg.roots]
+        settings_mod.save(cfg, roots, {**req.itch.model_dump(), "download_dir": download_dir})
+        rescan = [r.path for r in cfg.roots] != old_roots
+        if rescan:
+            from .scanner import scan
+            start_job("scan", lambda p: scan(cfg, p), "scanning library folders…")
+        return {**settings_out(), "rescan": rescan}
+
+    class KeyIn(BaseModel):
+        key: str
+
+    @app.post("/api/settings/itch-key")
+    def set_itch_key(req: KeyIn):
+        """Check the key with itch.io, then store it. The key is never sent back to the browser."""
+        from . import secrets as secrets_mod
+        from .itch import Client, ItchError
+        key = req.key.strip()
+        if not key:
+            raise HTTPException(400, "paste an API key first")
+        try:
+            user = Client(key, {"itch_api_key": key}).profile()
+        except ItchError:
+            raise HTTPException(400, "itch.io rejected this key. Copy it again from itch.io.") from None
+        settings_mod.save_secrets({**secrets_mod.load(), "itch_api_key": key})
+        db.set_kv(conn(), "itch_user", user.get("display_name") or user.get("username") or "")
+        return settings_out()
+
+    @app.delete("/api/settings/itch-key")
+    def delete_itch_key():
+        from . import secrets as secrets_mod
+        values = secrets_mod.load()
+        values.pop("itch_api_key", None)
+        settings_mod.save_secrets(values)
+        with conn() as c:
+            c.execute("DELETE FROM kv WHERE key='itch_user'")
+        return settings_out()
+
+    @app.get("/api/browse")
+    def browse(path: str = ""):
+        """Folder listing for the folder picker in Settings."""
+        try:
+            return settings_mod.browse(path or None)
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e)) from None
 
     def scheduler():
         """Periodic itch.io sync while the server runs (config: [itch] sync_every_hours)."""

@@ -1,6 +1,6 @@
 """itch.io integration: import purchases, their files and page metadata; match them to the library.
 
-Uses the official API (https://api.itch.io) with the personal API key from secrets.toml,
+Uses the official API (https://api.itch.io) with the personal API key (Settings, stored in secrets.toml),
 sent as a header so it never appears in URLs or error messages. Public asset pages are
 fetched without credentials for tags/license.
 """
@@ -53,6 +53,9 @@ class Client(net.Client):
             h["Authorization"] = f"Bearer {self._key}"
         return h
 
+    def profile(self) -> dict:
+        return self.get(f"{API}/profile").get("user") or {}
+
     def owned_keys(self) -> list[dict]:
         out, page = [], 1
         while True:
@@ -96,7 +99,7 @@ def client_from_secrets() -> Client:
     values = secrets.load()
     key = values.get("itch_api_key")
     if not key:
-        raise ItchError("itch_api_key missing from secrets.toml")
+        raise ItchError("connect itch.io in Settings first")
     return Client(key, values)
 
 
@@ -446,7 +449,7 @@ def pending_files(conn, item_ids: list[int] | None = None, new_only: bool = Fals
 
 def download_many(cfg, file_ids: list[int], progress=None) -> dict:
     if not cfg.itch_download_dir:
-        raise ItchError("set [itch] download_dir in config.toml first")
+        raise ItchError("choose a download folder in Settings first")
     require_dir(cfg.itch_download_dir)
     conn = db.connect(cfg)
     rows = {r["id"]: r for r in conn.execute(f"SELECT id, filename, match_pack_id FROM store_files WHERE id IN "

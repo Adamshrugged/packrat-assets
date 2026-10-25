@@ -22,7 +22,7 @@
 <h3>Library</h3>
 <ul>
   <li><b>Library</b> browses packs by folder, type and tag. <b>Search</b> (press <kbd>/</kbd>) finds packs and individual files, including files inside zip and rar archives.</li>
-  <li>On a pack page, <b>Copy path</b> copies where the pack lives on disk. The <b>Your notes</b> panel stores vendor, license, tags, rating and favorite.</li>
+  <li>On a pack page, <b>Copy path</b> copies its location on disk. <b>Your notes</b> holds its store, license, tags, rating and favorite.</li>
   <li><b>Rescan</b> (top right) re-indexes your library folders after you add or move packs.</li>
 </ul>
 <h3>Adding new assets</h3>
@@ -34,8 +34,9 @@
 
 <h2 id="g-itch">itch.io purchases</h2>
 <ul>
+  <li>Connect your account in <b>Settings</b> with an itch.io API key.</li>
   <li><b>Purchases</b> lists everything you own on itch.io and whether it's in your library. Files are matched by exact name and size, then by size only, then by pack name.</li>
-  <li><b>Sync itch.io</b> imports new purchases. Packrat can also sync on a schedule while it runs.</li>
+  <li><b>Sync itch.io</b> imports new purchases. Set a schedule in <b>Settings</b>.</li>
   <li><b>Download</b> (per purchase) or <b>Download all missing</b> saves files to your download folder, one folder per purchase. Each download is checked against itch.io's checksum before it's kept.</li>
   <li>Extras such as GameMaker <code>.yymps</code> packages, <code>.exe</code> files, HTML demos and <code>License.txt</code> are listed but don't count as "missing".</li>
   <li><b>Hide</b> removes purchases you'll never want from the lists. Type in the filter box to get a <b>Hide all shown</b> button for bulk hiding.</li>
@@ -83,7 +84,7 @@ and record the license terms of anything used in CREDITS.md.</code></pre>
   <dd>Check that this page opens in a browser on that computer. If it does, run the command from <a href="#g-claude-connect">Connect Claude</a> again, then restart Claude Code. Say "my Packrat library" in requests.</dd>
 
   <dt>itch.io sync fails or says the API key is missing</dt>
-  <dd>Create an API key on itch.io under <i>Settings → API keys</i> and add it to Packrat. If the key was revoked, create a new one.</dd>
+  <dd>Create a new API key on itch.io (<i>Settings → API keys</i>) and paste it in Packrat's <b>Settings</b>.</dd>
 
   <dt>.rar or .7z packs show no files</dt>
   <dd>Packrat needs 7-Zip to read them. On Windows install 7-Zip from 7-zip.org; on Linux install <code>7zip</code> (or <code>p7zip-full</code>) from your package manager. Then press <b>Rescan</b>.</dd>

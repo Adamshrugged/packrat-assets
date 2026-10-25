@@ -14,6 +14,7 @@ class Root:
     path: str
     display: str
     containers: list[str]
+    auto: bool = False  # added by Packrat (the itch.io download folder), not chosen in Settings
 
 
 @dataclass
@@ -27,6 +28,7 @@ class Config:
     itch_sync_hours: float = 0
     itch_auto_download: bool = False
     allowed_hosts: list[str] = field(default_factory=list)
+    source: str = ""  # the config.toml this was loaded from (it may not exist yet)
 
     @property
     def db_path(self) -> str:
@@ -48,6 +50,11 @@ class Config:
         if member:
             shown += sep + member.replace("/", sep)
         return shown
+
+
+def inside(path: str, folder: str) -> bool:
+    path, folder = os.path.normcase(path), os.path.normcase(folder)
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
 
 
 def find_7z() -> str | None:
@@ -77,7 +84,7 @@ def default_path() -> str:
 
 
 def load(path: str | None = None) -> Config:
-    path = path or default_path()
+    path = os.path.abspath(path or default_path())
     base = os.path.dirname(os.path.abspath(path))
     raw = {}
     if os.path.exists(path):
@@ -102,14 +109,20 @@ def load(path: str | None = None) -> Config:
         ))
 
     itch = raw.get("itch", {})
+    download_dir = os.path.normpath(os.path.expanduser(itch["download_dir"])) if itch.get("download_dir") else None
+    if download_dir and not any(inside(download_dir, r.path) for r in roots):
+        # Downloads must be indexed, so the download folder is always part of the library.
+        roots.append(Root(label="itch.io downloads", path=download_dir, display=download_dir, containers=[],
+                          auto=True))
     return Config(
         roots=roots,
         data_dir=data,
         host=srv.get("host", "127.0.0.1"),
         port=int(srv.get("port", 8765)),
         sevenzip=cat.get("sevenzip") or find_7z(),
-        itch_download_dir=os.path.normpath(itch["download_dir"]) if itch.get("download_dir") else None,
+        itch_download_dir=download_dir,
         itch_sync_hours=float(itch.get("sync_every_hours", 0)),
         itch_auto_download=bool(itch.get("auto_download", False)),
         allowed_hosts=[h.lower() for h in srv.get("allowed_hosts", [])],
+        source=path,
     )

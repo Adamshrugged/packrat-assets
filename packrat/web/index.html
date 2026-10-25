@@ -14,18 +14,20 @@
       <a href="#/" data-nav="library">Library</a>
       <a href="#/purchases" data-nav="purchases">Purchases <span id="nav-missing" class="count" hidden></span></a>
       <a href="#/guide" data-nav="guide">Guide</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
     </nav>
     <form id="search" role="search">
       <input id="q" type="search" placeholder="Search packs and files…  ( / )" autocomplete="off">
     </form>
     <div class="scan">
       <span id="scan-status" class="dim"></span>
-      <button id="rescan" class="btn" type="button" title="Re-index the library folders">Rescan</button>
+      <button id="rescan" class="btn" type="button" title="Re-index your library">Rescan</button>
     </div>
   </header>
   <main id="view"></main>
   <div id="lightbox" hidden></div>
   <div id="toast" hidden></div>
+  <dialog id="picker"></dialog>
   <script src="app.js"></script>
 </body>
 </html>
