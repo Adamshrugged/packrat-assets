@@ -98,3 +98,14 @@ def test_program_command_for_each_install(monkeypatch):
         assert program.command(windowed=True).pop().endswith("Packrat.exe")
     else:
         assert program.command() == [sys.executable]
+
+
+def test_bundled_linux_app_starts_programs_with_system_libraries(monkeypatch):
+    from packrat import program
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/tmp/.mount_x/usr/packrat/_internal")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    assert "LD_LIBRARY_PATH" not in program.external_env()  # nothing was set before the app started
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/opt/mylibs")
+    assert program.external_env()["LD_LIBRARY_PATH"] == "/opt/mylibs"  # the user's own value comes back

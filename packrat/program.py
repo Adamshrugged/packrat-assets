@@ -27,3 +27,17 @@ def command(windowed: bool = False) -> list[str]:
 def shell_line(args: list[str]) -> str:
     """args as one line to paste into a terminal (PowerShell on Windows)."""
     return subprocess.list2cmdline(args) if os.name == "nt" else shlex.join(args)
+
+
+def external_env() -> dict:
+    """The environment for starting other programs (the browser, the file manager). The bundled Linux app points
+    LD_LIBRARY_PATH at its own libraries; programs it starts must load the system's instead (its older libstdc++
+    breaks KDE's file opener, for one). PyInstaller keeps the original value in LD_LIBRARY_PATH_ORIG."""
+    env = dict(os.environ)
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        original = env.pop("LD_LIBRARY_PATH_ORIG", None)
+        if original:
+            env["LD_LIBRARY_PATH"] = original
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    return env

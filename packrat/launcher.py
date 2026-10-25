@@ -8,8 +8,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-import webbrowser
 from logging.handlers import RotatingFileHandler
+
+from .desktop import open_url
 
 log = logging.getLogger("packrat")
 
@@ -57,7 +58,7 @@ def log_to_file(cfg) -> str:
 def make_tray(cfg, stopping: threading.Event):
     """A tray icon with Open and Quit: over D-Bus on Linux, pystray on Windows and macOS."""
     def open_page():
-        webbrowser.open(page(cfg))
+        open_url(page(cfg))
     if sys.platform.startswith("linux"):
         from . import tray_linux
         if not tray_linux.available():
@@ -76,7 +77,7 @@ def run(cfg, open_browser: bool = True) -> None:
     state = already_running(cfg)
     if state == "packrat":
         if open_browser:
-            webbrowser.open(page(cfg))
+            open_url(page(cfg))
         return
     if state == "other":
         raise SystemExit(f"Port {cfg.port} is used by another program. Set a different [server] port in {cfg.source}.")
@@ -93,7 +94,7 @@ def run(cfg, open_browser: bool = True) -> None:
         raise SystemExit(f"Packrat couldn't start; see {log_path}")
     log.info("running at %s", page(cfg))
     if open_browser:
-        webbrowser.open(page(cfg))
+        open_url(page(cfg))
 
     try:
         icon = make_tray(cfg, stopping)
