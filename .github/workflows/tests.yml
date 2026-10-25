@@ -1,0 +1,41 @@
+# Runs the tests on Linux and Windows for every push and pull request. Once a week (and by hand) it also
+# checks that itch.io's search, tag and asset pages still parse, since itch.io can change them any time.
+name: Tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"  # Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Lint
+        run: uvx pyflakes packrat tests
+      - name: Tests
+        run: uv run pytest
+
+  itch-pages:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: itch.io pages still parse
+        run: uv run pytest -m live

@@ -5,13 +5,14 @@ from fastapi.testclient import TestClient
 from packrat import config
 from packrat.app import create_app
 from packrat.auth import MAX_FAILURES, hash_password, verify_password
+from conftest import toml_str
 
 
 @pytest.fixture
 def remote(tmp_path, monkeypatch):
     (tmp_path / "lib").mkdir()
-    (tmp_path / "config.toml").write_text(f'[paths]\ndata_dir = "{tmp_path / "data"}"\n[server]\nhost = "0.0.0.0"\n'
-                                          f'[itch]\nsync_every_hours = 0.0\n[[roots]]\npath = "{tmp_path / "lib"}"\n')
+    (tmp_path / "config.toml").write_text(f'[paths]\ndata_dir = {toml_str(tmp_path / "data")}\n[server]\nhost = "0.0.0.0"\n'
+                                          f'[itch]\nsync_every_hours = 0.0\n[[roots]]\npath = {toml_str(tmp_path / "lib")}\n')
     monkeypatch.setenv("PACKRAT_SECRETS", str(tmp_path / "secrets.toml"))
     app = create_app(config.load(str(tmp_path / "config.toml")))
     return TestClient(app, base_url="http://localhost"), app.state.ctx.auth

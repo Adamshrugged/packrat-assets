@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from packrat import config, db, itch
 from packrat.app import create_app
+from conftest import toml_str
 
 
 def wait_idle(client, job, timeout=10):
@@ -30,8 +31,8 @@ def app(tmp_path, monkeypatch):
         z.writestr("Forest/License.txt", b"CC0")
     (tmp_path / "dl").mkdir()  # a chosen download folder must exist (it may be on a drive that's not connected)
     (tmp_path / "config.toml").write_text(
-        f'[paths]\ndata_dir = "{tmp_path / "data"}"\n[itch]\ndownload_dir = "{tmp_path / "dl"}"\n'
-        f'sync_every_hours = 0.0\n[[roots]]\npath = "{lib}"\n')
+        f'[paths]\ndata_dir = {toml_str(tmp_path / "data")}\n[itch]\ndownload_dir = {toml_str(tmp_path / "dl")}\n'
+        f'sync_every_hours = 0.0\n[[roots]]\npath = {toml_str(lib)}\n')
     monkeypatch.setenv("PACKRAT_SECRETS", str(tmp_path / "secrets.toml"))
     cfg = config.load(str(tmp_path / "config.toml"))
     client = TestClient(create_app(cfg), base_url="http://localhost")
@@ -131,7 +132,7 @@ def test_failed_sync_waits_a_full_interval(app):
 def test_same_named_folders_get_distinct_labels(tmp_path):
     for d in ("a/assets", "b/assets"):
         (tmp_path / d).mkdir(parents=True)
-    (tmp_path / "c.toml").write_text(f'[[roots]]\npath = "{tmp_path / "a/assets"}"\n[[roots]]\npath = "{tmp_path / "b/assets"}"\n')
+    (tmp_path / "c.toml").write_text(f'[[roots]]\npath = {toml_str(tmp_path / "a/assets")}\n[[roots]]\npath = {toml_str(tmp_path / "b/assets")}\n')
     labels = [r.label for r in config.load(str(tmp_path / "c.toml")).roots if not r.auto]
     assert labels == ["assets", "assets (2)"]
 
@@ -151,8 +152,8 @@ def test_download_folder_inside_the_library(tmp_path):
     for d in ("itch.io/Coins/coin.png", "itch.io/Swords/sword.png", "Other Pack/x.png"):
         (lib / d).parent.mkdir(parents=True, exist_ok=True)
         (lib / d).write_bytes(b"x")
-    (tmp_path / "c.toml").write_text(f'[paths]\ndata_dir = "{tmp_path / "data"}"\n[itch]\ndownload_dir = '
-                                     f'"{lib / "itch.io"}"\n[[roots]]\npath = "{lib}"\n')
+    (tmp_path / "c.toml").write_text(f'[paths]\ndata_dir = {toml_str(tmp_path / "data")}\n[itch]\ndownload_dir = '
+                                     f'{toml_str(lib / "itch.io")}\n[[roots]]\npath = {toml_str(lib)}\n')
     cfg = config.load(str(tmp_path / "c.toml"))
     db.init(cfg)
     scan(cfg)

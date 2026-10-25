@@ -7,6 +7,7 @@ import pytest
 
 from packrat import config, settings
 from packrat.itch import safe_name
+from conftest import toml_str
 
 
 def test_toml_round_trip():
@@ -20,7 +21,8 @@ def test_save_and_reload(tmp_path):
     lib.mkdir()
     cfg = config.load(str(tmp_path / "config.toml"))  # not created yet
     settings.save(cfg, [{"path": str(lib)}], {"download_dir": None, "sync_every_hours": 6, "auto_download": True})
-    assert oct(os.stat(cfg.source).st_mode & 0o777) == "0o600"
+    if os.name != "nt":  # Windows has no Unix permissions; the user profile folder keeps it private there
+        assert oct(os.stat(cfg.source).st_mode & 0o777) == "0o600"
     again = config.load(cfg.source)
     assert [r.path for r in again.roots if not r.auto] == [str(lib)]
     assert again.itch_sync_hours == 6 and again.itch_auto_download
@@ -28,14 +30,14 @@ def test_save_and_reload(tmp_path):
 
 
 def test_download_folder_is_always_indexed(tmp_path):
-    (tmp_path / "config.toml").write_text(f'[itch]\ndownload_dir = "{tmp_path / "dl"}"\n')
+    (tmp_path / "config.toml").write_text(f'[itch]\ndownload_dir = {toml_str(tmp_path / "dl")}\n')
     cfg = config.load(str(tmp_path / "config.toml"))
     assert [(r.path, r.auto) for r in cfg.roots] == [(str(tmp_path / "dl"), True)]
 
 
 def test_download_folder_inside_a_root_is_not_added_twice(tmp_path):
     (tmp_path / "config.toml").write_text(
-        f'[itch]\ndownload_dir = "{tmp_path / "lib" / "itch"}"\n[[roots]]\npath = "{tmp_path / "lib"}"\n')
+        f'[itch]\ndownload_dir = {toml_str(tmp_path / "lib" / "itch")}\n[[roots]]\npath = {toml_str(tmp_path / "lib")}\n')
     assert len(config.load(str(tmp_path / "config.toml")).roots) == 1
 
 
