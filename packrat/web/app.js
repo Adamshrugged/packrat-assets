@@ -555,6 +555,9 @@ async function viewPurchases(seq, params) {
         <button class="btn small primary" id="get-shown">Download all shown</button>
       </div>
       ${assetPanel}
+      ${summary.sync_errors.length ? `<details class="panel sync-errors"><summary class="warn">${plural(summary.sync_errors.length, 'purchase')} couldn't be refreshed in the last sync</summary>
+        <ul>${summary.sync_errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+        <p class="dim">Usually temporary: press <b>Sync itch.io</b> to retry.</p></details>` : ''}
       ${summary.total ? `<nav class="tabs">${tabs.map(([v, l]) => `<a href="${here({ status: v })}" class="${status === v ? 'on' : ''}">${l} <span class="n">${count(v)}</span></a>`).join('')}</nav>` : ''}
       <div class="plist" id="plist"></div>
     </section></div>`;
@@ -1157,6 +1160,7 @@ async function trackActivity() {
   const { download: dl, itch: sync } = a;
   const el = $('#activity');
   el.hidden = !dl.running && !sync.running;
+  $('#activity-cancel').hidden = !dl.running;
   el.textContent = dl.running ? downloadText(dl) : 'Syncing itch.io…';
   $$('[data-progress-item]').forEach((b) => {
     const st = a.items[b.dataset.progressItem];
@@ -1167,9 +1171,13 @@ async function trackActivity() {
 
   if (activityWas.download && !dl.running) {
     const r = dl.result?.itch;
-    toast(dl.error ? `Download failed: ${dl.error}` : r?.failed ? `${plural(r.failed, 'download')} failed` : 'Downloads finished');
+    toast(dl.error ? `Download failed: ${dl.error}` : r?.cancelled ? 'Downloads cancelled'
+      : r?.failed ? `${plural(r.failed, 'download')} failed` : 'Downloads finished');
   }
-  if (activityWas.itch && !sync.running) toast(sync.error ? `Sync failed: ${sync.error}` : 'Sync finished');
+  if (activityWas.itch && !sync.running) {
+    const n = sync.result?.errors || 0;
+    toast(sync.error ? `Sync failed: ${sync.error}` : n ? `Sync finished; ${plural(n, 'purchase')} couldn't be refreshed` : 'Sync finished');
+  }
   const finished = (activityWas.download && !dl.running) || (activityWas.itch && !sync.running);
   activityWas = { download: dl.running, itch: sync.running };
   if (finished) {
@@ -1210,6 +1218,12 @@ async function pollJob(name, statusEl, btnEl, doneLabel, wasRunning = false) {
     route();
   } else status.textContent = '';
 }
+
+$('#activity-cancel').onclick = async () => {
+  if (!confirm('Cancel downloads? Files already downloaded are kept.')) return;
+  await api('/api/downloads/cancel', { method: 'POST' }).catch((e) => toast(e.message));
+  trackActivity();
+};
 
 $('#rescan').onclick = async () => {
   await api('/api/scan', { method: 'POST' });

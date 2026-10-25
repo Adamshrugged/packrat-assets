@@ -11,6 +11,14 @@ UA = "packrat/0.1 (+https://github.com/Adamshrugged/packrat-assets)"
 RETRY_CODES = (429, 500, 502, 503, 504)
 
 
+def retry_after(e: urllib.error.HTTPError) -> float | None:
+    """Seconds the server asked us to wait (Retry-After), capped at two minutes."""
+    try:
+        return min(120.0, max(0.0, float(e.headers.get("Retry-After", ""))))
+    except (TypeError, ValueError):
+        return None
+
+
 class Client:
     """Base for a store's API client. Subclasses set `error` and `gap`, and override `headers`, and
     optionally `check` (inspect a successful response) and `http_error` (map a status to a clearer error)."""
@@ -52,7 +60,7 @@ class Client:
                 if custom is not None:
                     raise custom from None
                 if e.code in RETRY_CODES and attempt < 3:
-                    time.sleep(2 ** attempt * 3)
+                    time.sleep(retry_after(e) or 2 ** attempt * 3)
                     continue
                 raise self.error(secrets.redact(f"HTTP {e.code} from {url.split('?')[0]}", self._secrets)) from None
             except (urllib.error.URLError, TimeoutError) as e:

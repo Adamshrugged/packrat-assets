@@ -24,5 +24,13 @@ packrat = "packrat.__main__:main"
 [project.urls]
 Homepage = "https://github.com/Adamshrugged/packrat-assets"
 
+[dependency-groups]
+dev = ["pytest>=8", "httpx"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: talks to itch.io; catches itch.io page changes (run with: pytest -m live)"]
+addopts = "-m 'not live'"
+
 [tool.hatch.build.targets.wheel]
 packages = ["packrat"]

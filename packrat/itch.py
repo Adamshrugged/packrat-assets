@@ -32,6 +32,14 @@ class ItchError(Exception):
     pass
 
 
+class DownloadCancelled(Exception):
+    """Raised from a progress callback to stop a download batch."""
+
+
+class KeyRejected(ItchError):
+    """The API key was revoked or is wrong. Every request will fail, so a sync stops at the first one."""
+
+
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None  # surface the 3xx as an HTTPError so we can read Location
@@ -52,6 +60,12 @@ class Client(net.Client):
         if auth:
             h["Authorization"] = f"Bearer {self._key}"
         return h
+
+    def http_error(self, e: urllib.error.HTTPError) -> Exception | None:
+        # 403 on a game's uploads can mean just that purchase is gone (refunded); on /profile it's the key.
+        if e.code == 401 or (e.code == 403 and "/profile" in (e.url or "")):
+            return KeyRejected("itch.io rejected your API key. Reconnect in Settings.")
+        return None
 
     def profile(self) -> dict:
         return self.get(f"{API}/profile").get("user") or {}
@@ -200,6 +214,8 @@ def _refresh_item(cfg, client: Client, item, now: float, force: bool) -> str | N
                      meta.get("author", ""), meta.get("author", ""), item["id"]),
                 )
         return None
+    except KeyRejected:
+        raise
     except ItchError as e:
         return f"{item['title']}: {e}"
     finally:
@@ -232,6 +248,7 @@ def sync(cfg, progress=None, force: bool = False) -> dict:
                 log.warning(err)
             if progress:
                 progress(done, len(items), "fetching files and page info")
+    db.set_kv(conn, "itch_last_errors", json.dumps(sorted(errors)[:200]))
     stats = match(cfg, conn)
     conn.close()
     return {"purchases": len(items), "errors": len(errors), "error_samples": errors[:5], **stats}
@@ -484,26 +501,31 @@ def download_many(cfg, file_ids: list[int], progress=None) -> dict:
     conn.close()
     # a queued download may find some files already fetched by the one before it
     file_ids = [f for f in file_ids if f in rows and rows[f]["match_pack_id"] is None]
-    done, failed = [], []
-    for i, fid in enumerate(file_ids):
-        name = rows[fid]["filename"]
+    done, failed, cancelled = [], [], False
+    try:
+        for i, fid in enumerate(file_ids):
+            name = rows[fid]["filename"]
 
-        def step(got, size, i=i, name=name):
-            if progress:
-                pct = f" {got * 100 // size}%" if size else ""
-                progress(i, len(file_ids), f"Downloading {name}{pct}")
-        step(0, 0)
-        try:
-            done.append(download(cfg, fid, cfg.itch_download_dir, step))
-        except Exception as e:
-            failed.append(f"{name}: {e}")
-            log.warning("download failed: %s: %s", name, e)
+            def step(got, size, i=i, name=name):
+                if progress:
+                    pct = f" {got * 100 // size}%" if size else ""
+                    progress(i, len(file_ids), f"Downloading {name}{pct}")
+            step(0, 0)
+            try:
+                done.append(download(cfg, fid, cfg.itch_download_dir, step))
+            except DownloadCancelled:
+                raise
+            except Exception as e:
+                failed.append(f"{name}: {e}")
+                log.warning("download failed: %s: %s", name, e)
+    except DownloadCancelled:
+        cancelled = True  # the file in progress is discarded; finished ones are kept and indexed below
     if done:
-        if progress:
+        if progress and not cancelled:
             progress(len(file_ids), len(file_ids), "Indexing new downloads…")
         from .scanner import scan_paths
         scan_paths(cfg, done)  # index just the new packs; also re-matches purchases
-    return {"downloaded": len(done), "failed": len(failed), "errors": failed[:10]}
+    return {"downloaded": len(done), "failed": len(failed), "errors": failed[:10], "cancelled": cancelled}
 
 
 def sync_and_auto_download(cfg, progress=None) -> dict:

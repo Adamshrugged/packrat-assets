@@ -438,6 +438,7 @@ def create_app(cfg) -> FastAPI:
             "pending_items": len({r["item_id"] for r in pending}),
             "download_dir": cfg.display_path(cfg.itch_download_dir) if cfg.itch_download_dir else None,
             "last_sync": float(db.get_kv(c, "itch_last_sync", 0) or 0),
+            "sync_errors": json.loads(db.get_kv(c, "itch_last_errors", "[]") or "[]"),
             "auto_download": cfg.itch_auto_download, "sync_every_hours": cfg.itch_sync_hours,
         }
 
@@ -464,22 +465,36 @@ def create_app(cfg) -> FastAPI:
         return start_download(itch_ids)
 
     downloads: dict[int, str] = {}  # item id -> "queued" | "running", while its files download
+    cancels = {"generation": 0}  # Cancel bumps this; batches queued or running before it stop
 
     def start_download(file_ids: list[int]) -> dict:
-        from .itch import download_many
+        from .itch import DownloadCancelled, download_many
         item_ids = [r[0] for r in conn().execute(
             f"SELECT DISTINCT item_id FROM store_files WHERE id IN ({','.join('?' * len(file_ids))})", file_ids)]
         for i in item_ids:
             downloads.setdefault(i, "queued")
+        generation = cancels["generation"]
 
         def run(progress):
+            def checked(*args):
+                if cancels["generation"] != generation:
+                    raise DownloadCancelled()
+                progress(*args)
             downloads.update(dict.fromkeys(item_ids, "running"))
             try:
-                return {"itch": download_many(cfg, file_ids, progress)}
+                if cancels["generation"] != generation:
+                    return {"itch": {"downloaded": 0, "failed": 0, "errors": [], "cancelled": True}}
+                return {"itch": download_many(cfg, file_ids, checked)}
             finally:
                 for i in item_ids:
                     downloads.pop(i, None)
         return start_job("download", run, f"Queued {len(file_ids)} files…", queue=True)
+
+    @app.post("/api/downloads/cancel")
+    def cancel_downloads():
+        """Stop the running download batch and drop the queued ones. Finished files are kept."""
+        cancels["generation"] += 1
+        return {"ok": True}
 
     @app.get("/api/activity")
     def activity():

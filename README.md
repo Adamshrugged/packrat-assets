@@ -43,6 +43,13 @@ claude mcp add packrat --scope user -- packrat mcp
 
 Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. It has no login, so don't expose it to your network unless you trust everyone on it.
 
+## Tests
+
+```
+uv run pytest          # offline tests
+uv run pytest -m live  # also checks that itch.io's pages still parse (needs internet)
+```
+
 ## License
 
 The Packrat code is released under the [MIT License](LICENSE). This covers Packrat itself, not the assets it manages.
