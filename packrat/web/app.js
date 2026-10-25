@@ -228,7 +228,7 @@ async function viewHome(seq, params, hash) {
 function fileActions(f) {
   return `<div class="acts">
     <button class="btn small" data-copy="${esc(f.display_path)}" title="${esc(f.display_path)}">Copy path</button>
-    ${canReveal ? `<button class="btn small" data-reveal="${f.id}" title="Show in Explorer">Show</button>` : ''}
+    ${canReveal ? `<button class="btn small" data-reveal="${f.id}" title="Show in folder">Show</button>` : ''}
     <a class="btn small" href="${f.raw}?download=1" title="Download">⤓</a>
   </div>`;
 }
@@ -355,7 +355,7 @@ async function viewPack(seq, id, params) {
       <div class="pathline">
         <code class="mono">${esc(p.display_path)}</code>
         <button class="btn small" data-copy="${esc(p.display_path)}">Copy path</button>
-        ${canReveal ? `<button class="btn small" data-reveal-pack="${p.id}">Show in Explorer</button>` : ''}
+        ${canReveal ? `<button class="btn small" data-reveal-pack="${p.id}">Show in folder</button>` : ''}
       </div>
     </div>
     <div class="pack-layout">
@@ -907,7 +907,7 @@ function renderLightbox() {
       <div class="nm"><div>${esc(f.name)} <span id="lb-dim" style="color:#9a9aa0"></span></div><small>${esc(f.display_path)}</small></div>
       <span style="color:#9a9aa0">${lb.i + 1} / ${lb.list.length}${lb.list.length >= 300 ? '+' : ''}</span>
       <button class="btn small" data-copy="${esc(f.display_path)}">Copy path</button>
-      ${canReveal ? `<button class="btn small" data-reveal="${f.id}">Show in Explorer</button>` : ''}
+      ${canReveal ? `<button class="btn small" data-reveal="${f.id}">Show in folder</button>` : ''}
       <a class="btn small" href="${f.raw}?download=1">Download</a>
       ${f.pack_name ? `<a class="btn small" href="#/pack/${f.pack_id}" data-close>Open pack</a>` : ''}
     </div>
@@ -1011,7 +1011,7 @@ async function viewSettings(seq) {
         <h3>itch.io${s.first_run ? ' (optional)' : ''}</h3>
         <div id="key-block">${keyBlock}</div>
         <label for="dl">Download folder ${info('One subfolder per purchase. Always in your library.')}</label>
-        <div class="inline"><input id="dl" value="${esc(it.download_dir ?? '')}" placeholder="${esc(s.default_download_dir)}" spellcheck="false">
+        <div class="inline"><input id="dl" value="${esc(it.download_dir)}" spellcheck="false">
           <button type="button" class="btn" id="dl-pick">Browse…</button></div>
         <label for="hours">Sync automatically</label>
         <div class="inline"><select id="hours">
@@ -1030,7 +1030,7 @@ async function viewSettings(seq) {
       <dl class="kv">
         <dt>Settings file</dt><dd><code>${esc(s.config_path)}</code></dd>
         <dt>Database</dt><dd><code>${esc(s.data_dir)}</code></dd>
-        <dt>7-Zip</dt><dd>${s.sevenzip ? `<code>${esc(s.sevenzip)}</code>` : `Not found ${info('Needed for .rar and .7z packs.')}`}</dd>
+        <dt>Archive tools</dt><dd>${s.archive_tools.length ? esc(s.archive_tools.join(', ')) : `None found ${info('Install 7-Zip to read .rar and .7z packs.')}`}</dd>
       </dl>
       ${s.on_network ? '<p class="warn">No login: anyone on your network can change these.</p>' : ''}
     </section>

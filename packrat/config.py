@@ -62,9 +62,15 @@ def find_7z() -> str | None:
         found = shutil.which(name)
         if found:
             return found
-    for candidate in (r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe"):
-        if os.path.exists(candidate):
-            return candidate
+    if os.name == "nt":  # the 7-Zip installer doesn't add itself to PATH
+        for base in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"):
+            folder = os.environ.get(base)
+            candidates = [os.path.join(folder, "7-Zip", "7z.exe")] if folder else []
+            if base == "LOCALAPPDATA" and folder:
+                candidates.append(os.path.join(folder, "Programs", "7-Zip", "7z.exe"))
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    return candidate
     return None
 
 
@@ -77,6 +83,10 @@ def data_dir() -> str:
     """Per-user data folder (database, thumbnails): ~/.local/share/packrat on Linux,
     %LOCALAPPDATA%\\packrat on Windows."""
     return platformdirs.user_data_dir(APP, appauthor=False)
+
+
+def default_download_dir() -> str:
+    return os.path.join(os.path.expanduser("~"), "Packrat", "itch.io")
 
 
 def default_path() -> str:
@@ -109,8 +119,8 @@ def load(path: str | None = None) -> Config:
         ))
 
     itch = raw.get("itch", {})
-    download_dir = os.path.normpath(os.path.expanduser(itch["download_dir"])) if itch.get("download_dir") else None
-    if download_dir and not any(inside(download_dir, r.path) for r in roots):
+    download_dir = os.path.normpath(os.path.expanduser(itch.get("download_dir") or default_download_dir()))
+    if not any(inside(download_dir, r.path) for r in roots):
         # Downloads must be indexed, so the download folder is always part of the library.
         roots.append(Root(label="itch.io downloads", path=download_dir, display=download_dir, containers=[],
                           auto=True))

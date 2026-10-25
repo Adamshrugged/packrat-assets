@@ -58,7 +58,8 @@ def norm_name(name: str) -> str:
 def discover(cfg):
     for root in cfg.roots:
         if not os.path.isdir(root.path):
-            log.warning("root not reachable, skipping: %s", root.path)
+            if not root.auto:  # the default download folder only exists after the first download
+                log.warning("root not reachable, skipping: %s", root.path)
             continue
         base = os.path.normcase(root.path)
         transparent = set()

@@ -2,7 +2,6 @@ import json
 import mimetypes
 import os
 import re
-import subprocess
 import threading
 import time
 
@@ -12,9 +11,10 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db
+from . import db, desktop
 from .guard import HostGuard, is_loopback
-from .archives import read_member
+from . import config as config_mod
+from .archives import read_member, tools as archive_tools
 from .kinds import THUMBABLE
 from .thumbs import get_thumb
 
@@ -86,7 +86,8 @@ def create_app(cfg) -> FastAPI:
         return row
 
     def is_local(request: Request) -> bool:
-        return os.name == "nt" and request.client is not None and request.client.host in ("127.0.0.1", "::1")
+        """True for a browser on the computer running Packrat (only it can open a file manager here)."""
+        return request.client is not None and is_loopback(request.client.host)
 
     # ------------------------------------------------------------ library
 
@@ -296,7 +297,7 @@ def create_app(cfg) -> FastAPI:
 
     @app.post("/api/reveal")
     def reveal(request: Request, file_id: int | None = None, pack_id: int | None = None):
-        """Open Explorer at the item. Only for a browser on the machine running the server."""
+        """Open the file manager at the item. Only for a browser on the computer running Packrat."""
         if not is_local(request):
             raise HTTPException(403, "only works on the computer running Packrat")
         c = conn()
@@ -310,8 +311,11 @@ def create_app(cfg) -> FastAPI:
         else:
             raise HTTPException(400, "file_id or pack_id required")
         if not os.path.exists(target):
-            raise HTTPException(404, "not reachable")
-        subprocess.Popen(f'explorer /select,"{target}"' if select else f'explorer "{target}"')
+            raise HTTPException(404, "not found on disk")
+        try:
+            desktop.reveal(target, select)
+        except desktop.NoFileManager as e:
+            raise HTTPException(501, str(e)) from None
         return {"ok": True}
 
     # ------------------------------------------------------------ store purchases
@@ -579,8 +583,7 @@ def create_app(cfg) -> FastAPI:
                      "auto_download": cfg.itch_auto_download,
                      "has_key": bool(secrets_mod.load().get("itch_api_key")),
                      "user": db.get_kv(conn(), "itch_user")},
-            "config_path": cfg.source, "data_dir": cfg.data_dir, "sevenzip": cfg.sevenzip,
-            "default_download_dir": os.path.join(os.path.expanduser("~"), "Packrat", "itch.io"),
+            "config_path": cfg.source, "data_dir": cfg.data_dir, "archive_tools": list(archive_tools(cfg.sevenzip)),
             "on_network": not is_loopback(cfg.host),
         }
 
@@ -613,12 +616,13 @@ def create_app(cfg) -> FastAPI:
             if os.path.normcase(path) not in seen:
                 seen.add(os.path.normcase(path))
                 roots.append({**r.model_dump(), "path": path})
-        download_dir = req.itch.download_dir and os.path.normpath(os.path.expanduser(req.itch.download_dir.strip()))
-        if download_dir:
-            try:
+        download_dir = os.path.normpath(os.path.expanduser((req.itch.download_dir or "").strip()
+                                                           or config_mod.default_download_dir()))
+        try:
+            if download_dir != config_mod.default_download_dir():  # the default is made on first download
                 os.makedirs(download_dir, exist_ok=True)
-            except OSError as e:
-                raise HTTPException(400, f"can't create the download folder: {e.strerror}") from None
+        except OSError as e:
+            raise HTTPException(400, f"can't create the download folder: {e.strerror}") from None
         if req.itch.sync_every_hours < 0:
             raise HTTPException(400, "sync interval can't be negative")
         old_roots = [r.path for r in cfg.roots]

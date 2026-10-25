@@ -448,9 +448,11 @@ def pending_files(conn, item_ids: list[int] | None = None, new_only: bool = Fals
 
 
 def download_many(cfg, file_ids: list[int], progress=None) -> dict:
-    if not cfg.itch_download_dir:
-        raise ItchError("choose a download folder in Settings first")
-    require_dir(cfg.itch_download_dir)
+    from .config import default_download_dir
+    if cfg.itch_download_dir == default_download_dir():
+        os.makedirs(cfg.itch_download_dir, exist_ok=True)
+    else:
+        require_dir(cfg.itch_download_dir)  # a chosen folder may be on a drive that isn't connected
     conn = db.connect(cfg)
     rows = {r["id"]: r for r in conn.execute(f"SELECT id, filename, match_pack_id FROM store_files WHERE id IN "
                                              f"({','.join('?' * len(file_ids)) or 'NULL'})", file_ids)}
@@ -527,9 +529,15 @@ def fetch_to(url: str, target: str, progress=None, md5: str | None = None, size_
     return got
 
 
+WINDOWS_RESERVED = re.compile(r"(con|prn|aux|nul|com\d|lpt\d)(\..*)?", re.I)
+
+
 def safe_name(name: str) -> str:
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")
-    return name[:120] or "untitled"
+    """A file or folder name that's valid on Windows and Linux."""
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")[:120].rstrip(" .")
+    if WINDOWS_RESERVED.fullmatch(name):
+        name = "_" + name
+    return name or "untitled"
 
 
 def download(cfg, store_file_id: int, dest_root: str, progress=None) -> str:
