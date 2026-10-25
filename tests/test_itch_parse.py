@@ -38,7 +38,7 @@ def test_search_cells():
     assert paid["author"] == "Maker" and paid["author_url"] == "https://maker.itch.io"
     assert paid["cover_url"] == "https://img.itch.zone/a.png"
     assert paid["price"] == "$2.50" and paid["short_text"] == "Stone dice for your game"
-    assert free["price"] == ""  # no price tag means free or pay-what-you-want
+    assert free["price"] == "" and free["free"] and not paid["free"]  # no price tag: free or pay-what-you-want
 
 
 def test_asset_page_info_and_terms():
@@ -91,5 +91,5 @@ def test_live_free_tag_pages():
 @pytest.mark.live
 def test_live_asset_pages_have_tags():
     urls = [r["url"] for r in itch.search("pixel art tileset")[:5]]
-    metas = [itch.parse_page(itch._fetch_public(u)) for u in urls]
+    metas = [itch.parse_page(itch.fetch_public(u)) for u in urls]
     assert any(m.get("tags") for m in metas), "no tags found on asset pages; itch.io's info panel may have changed"

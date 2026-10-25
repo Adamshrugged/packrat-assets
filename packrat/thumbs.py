@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
+from . import db
 from .archives import read_file
 
 Image.MAX_IMAGE_PIXELS = None  # trusted local files; some sprite sheets are huge
@@ -28,7 +29,7 @@ def cover_rows(conn, pack_keys: list[str] | None = None) -> list:
     sql = "SELECT f.* FROM packs p JOIN files f ON f.id = p.cover_file_id WHERE p.missing = 0"
     if pack_keys is None:
         return conn.execute(sql).fetchall()
-    return conn.execute(f"{sql} AND p.key IN ({','.join('?' * len(pack_keys)) or 'NULL'})", pack_keys).fetchall()
+    return conn.execute(f"{sql} AND p.key IN ({db.placeholders(pack_keys)})", pack_keys).fetchall()
 
 
 def make_thumbs(cfg, rows, progress=None, label: str = "making thumbnails") -> int:

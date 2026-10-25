@@ -40,17 +40,14 @@ def write_private(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
-def save(cfg, roots: list[dict], itch: dict, server: dict | None = None) -> None:
+def save(cfg, roots: list[dict], itch: dict) -> None:
     """Write config.toml from the given settings, then reload it into cfg (in place, so the running app
-    sees the change)."""
-    catalog = {"data_dir": cfg.data_dir if cfg.data_dir != config.data_dir() else None}
-    srv = {"host": cfg.host if cfg.host != "127.0.0.1" else None,
-           "port": cfg.port if cfg.port != 8765 else None,
-           "allowed_hosts": cfg.allowed_hosts or None}
-    srv.update(server or {})
+    sees the change). Settings not edited in the UI (data folder, server) are kept as they are."""
     data = {
-        "catalog": catalog,
-        "server": srv,
+        "paths": {"data_dir": cfg.data_dir if cfg.data_dir != config.data_dir() else None},
+        "server": {"host": cfg.host if cfg.host != "127.0.0.1" else None,
+                   "port": cfg.port if cfg.port != 8765 else None,
+                   "allowed_hosts": cfg.allowed_hosts or None},
         "itch": {"download_dir": itch.get("download_dir") if itch.get("download_dir") != config.default_download_dir()
                  else None,
                  "sync_every_hours": float(itch.get("sync_every_hours") or 0),  # 0 = off

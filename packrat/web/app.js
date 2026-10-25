@@ -5,7 +5,11 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const view = $('#view');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : /(s|sh|ch|x)$/.test(word) ? 'es' : 's'}`;
-let canReveal = false;
+/** A link that opens outside Packrat, in a new tab; plain text when there's no URL. */
+const extLink = (url, html) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${html}</a>` : html);
+/** "by <author>", linked to their page when known. */
+const byAuthor = (name, url) => (name ? `by ${extLink(url, esc(name))}` : '');
+let canReveal = false;  // set at startup: only a browser on the computer running Packrat can open a file manager
 let routeSeq = 0;
 
 async function api(path, opts = {}) {
@@ -178,7 +182,6 @@ async function viewHome(seq, params, hash) {
   const cur = Object.fromEntries(params);
   const [facets, packs] = await Promise.all([api('/api/facets'), api('/api/packs?' + params)]);
   if (seq !== routeSeq) return false;
-  canReveal = facets.can_reveal;
   const t = facets.totals;
   const with_ = (k, v) => link('/', { ...cur, [k]: cur[k] === String(v) ? '' : v });
   const item = (k, v, label, n) => `<a href="${with_(k, v)}" class="${cur[k] === String(v) ? 'on' : ''}"><span>${esc(label)}</span><span class="n">${n ?? ''}</span></a>`;
@@ -228,6 +231,22 @@ async function viewHome(seq, params, hash) {
 }
 
 // ---------------------------------------------------------------- file rendering
+
+/** A "Load more" button in `el`: fetchPage(offset) returns the next {files}, add(files) shows them. */
+function loadMore(el, shown, total, fetchPage, add) {
+  const render = () => {
+    el.innerHTML = shown < total ? `<button class="btn">Load more (${(total - shown).toLocaleString()} left)</button>` : '';
+  };
+  el.onclick = async () => {
+    if (!$('button', el)) return;
+    el.innerHTML = '<span class="dim">Loading…</span>';
+    const next = await fetchPage(shown);
+    shown += next.files.length;
+    add(next.files);
+    render();
+  };
+  render();
+}
 
 function fileActions(f) {
   return `<div class="acts">
@@ -332,7 +351,6 @@ async function viewPack(seq, id, params) {
   const dir = cur.dir || '';
   const kind = cur.kind || '';
   const flat = cur.flat === '1';
-  if (!canReveal) canReveal = (await api('/api/facets')).can_reveal;
   const [p, listing] = await Promise.all([
     api(`/api/packs/${id}`),
     api(`/api/packs/${id}/files?` + new URLSearchParams({ dir, kind, flat, limit: 300 })),
@@ -349,8 +367,10 @@ async function viewPack(seq, id, params) {
   const dirCrumbs = [`<a href="${here({ dir: '' })}">${esc(p.name)}</a>`]
     .concat(segs.map((s, i) => `<a href="${here({ dir: segs.slice(0, i + 1).join('/') })}">${esc(s)}</a>`))
     .join(' / ');
+  // An archive inside the pack is listed as a folder of its contents, so leave out the archive file itself.
   const dirNames = new Set(listing.dirs.map((d) => d.path));
-  const files = listing.files.filter((f) => !(f.kind === 'archive' && dirNames.has(f.rel)));
+  const notADir = (f) => !(f.kind === 'archive' && dirNames.has(f.rel));
+  const files = listing.files.filter(notADir);
 
   view.innerHTML = `
     <div class="pack-head">
@@ -371,7 +391,7 @@ async function viewPack(seq, id, params) {
           <a class="btn small" href="${here({ flat: flat ? '' : 1 })}">${flat ? 'Show folders' : 'Show all files'}</a>
         </div>
         ${listing.dirs.length ? `<div class="dirs">${listing.dirs.map((d) =>
-          `<a class="dir" href="${here({ dir: d.path })}">${icon(/\.(zip|rar|7z)$/i.test(d.name) ? 'archive' : 'folder')}<span>${esc(d.name)}</span><span class="n">${d.count.toLocaleString()}</span></a>`).join('')}</div>` : ''}
+          `<a class="dir" href="${here({ dir: d.path })}">${icon(d.archive ? 'archive' : 'folder')}<span>${esc(d.name)}</span><span class="n">${d.count.toLocaleString()}</span></a>`).join('')}</div>` : ''}
         <div id="files"></div>
         ${!files.length && !listing.dirs.length ? '<div class="empty">No files here.</div>' : ''}
         <div class="more" id="more"></div>
@@ -381,28 +401,18 @@ async function viewPack(seq, id, params) {
 
   const list = new FileList($('#files'));
   list.add(files);
-  let offset = listing.files.length;
-  const more = $('#more');
-  const renderMore = () => {
-    more.innerHTML = offset < listing.total ? `<button class="btn">Load more (${(listing.total - offset).toLocaleString()} left)</button>` : '';
-  };
-  more.onclick = async () => {
-    more.innerHTML = '<span class="dim">Loading…</span>';
-    const next = await api(`/api/packs/${id}/files?` + new URLSearchParams({ dir, kind, flat, offset, limit: 300 }));
-    offset += next.files.length;
-    list.add(next.files.filter((f) => !(f.kind === 'archive' && dirNames.has(f.rel))));
-    renderMore();
-  };
-  renderMore();
+  loadMore($('#more'), listing.files.length, listing.total,
+    (offset) => api(`/api/packs/${id}/files?` + new URLSearchParams({ dir, kind, flat, offset, limit: 300 })),
+    (more) => list.add(more.filter(notADir)));
   bindPackPanel(p);
 }
 
 function storePanel(it) {
   return `<div class="panel store-panel">
     <h3>From ${it.store === 'itch' ? 'itch.io' : esc(it.store)}</h3>
-    ${it.cover_url ? `<a href="${esc(it.url)}" target="_blank" rel="noopener"><img class="cover" src="${esc(it.cover_url)}" alt="" loading="lazy"></a>` : ''}
-    <div class="t"><a href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.title)}</a></div>
-    <div class="dim" style="font-size:12.5px">by ${it.author_url ? `<a href="${esc(it.author_url)}" target="_blank" rel="noopener">${esc(it.author)}</a>` : esc(it.author)}${it.purchased_at ? ` · bought ${esc(it.purchased_at.slice(0, 10))}` : ''}</div>
+    ${it.cover_url ? extLink(it.url, `<img class="cover" src="${esc(it.cover_url)}" alt="" loading="lazy">`) : ''}
+    <div class="t">${extLink(it.url, esc(it.title))}</div>
+    <div class="dim" style="font-size:12.5px">${byAuthor(it.author, it.author_url)}${it.purchased_at ? ` · bought ${esc(it.purchased_at.slice(0, 10))}` : ''}</div>
     <dl class="kv" style="margin-top:8px">
       <dt>License</dt><dd>${esc(it.license || (it.terms ? 'see terms' : 'not stated'))}</dd>
       ${it.ai ? `<dt>AI</dt><dd>${esc(it.ai)}</dd>` : ''}
@@ -494,18 +504,17 @@ function purchaseRow(it) {
     return `<div class="pfile"><span class="fn">${esc(f.filename)}</span><span class="dim">${fmtSize(f.size)}</span>${where}</div>`;
   }).join('');
   const bought = it.purchased_at ? it.purchased_at.slice(0, 10) : '';
-  const link_ = it.url;
-  const by = it.author ? `by ${it.author_url ? `<a href="${esc(it.author_url)}" target="_blank" rel="noopener">${esc(it.author)}</a>` : esc(it.author)}` : '';
-  const meta = [by, bought && `${it.free ? 'added' : 'bought'} ${bought}`, it.license && esc(it.license), it.ai && `AI: ${esc(it.ai)}`]
+  const meta = [byAuthor(it.author, it.author_url), bought && `${it.free ? 'added' : 'bought'} ${bought}`,
+    it.license && esc(it.license), it.ai && `AI: ${esc(it.ai)}`, it.page_gone && 'page removed from itch.io']
     .filter(Boolean).join(' · ');
   const actions = [];
   if (it.downloading) actions.push(`<button class="btn small primary" disabled data-progress-item="${it.id}">${it.downloading === 'running' ? 'Downloading…' : 'Queued…'}</button>`);
   else if (hasPending(it)) actions.push(`<button class="btn small primary" data-dl-item="${it.id}">Download</button>`);
   actions.push(`<button class="btn small" data-hide="${it.id}" data-hidden="${it.hidden ? 1 : 0}" title="Hide from these lists">${it.hidden ? 'Unhide' : 'Hide'}</button>`);
   return `<div class="purchase" data-item="${it.id}">
-    <a class="pcover" href="${esc(link_)}" target="_blank" rel="noopener">${it.cover_url ? `<img src="${esc(it.cover_url)}" alt="" loading="lazy">` : ''}</a>
+    <a class="pcover" href="${esc(it.url)}" target="_blank" rel="noopener">${it.cover_url ? `<img src="${esc(it.cover_url)}" alt="" loading="lazy">` : ''}</a>
     <div class="pbody">
-      <div class="ptitle">${link_ ? `<a href="${esc(link_)}" target="_blank" rel="noopener">${esc(it.title)}</a>` : esc(it.title)}<span class="pill st-${it.status}">${STATUS[it.status]}</span><span class="chip">${STORE_NAME[it.store] || esc(it.store)}</span>${it.free ? '<span class="chip" title="Free asset added from itch.io">Free</span>' : ''}</div>
+      <div class="ptitle">${extLink(it.url, esc(it.title))}<span class="pill st-${it.status}">${STATUS[it.status]}</span><span class="chip">${STORE_NAME[it.store] || esc(it.store)}</span>${it.free ? '<span class="chip" title="Free asset added from itch.io">Free</span>' : ''}</div>
       <div class="pmeta">${meta}</div>
       ${it.tags.length ? `<div>${it.tags.slice(0, 10).map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
       <div class="pfiles">${files || '<span class="dim">No files to download.</span>'}</div>
@@ -642,7 +651,6 @@ const ITCH_PAGE = /^(https?:\/\/)?[a-z0-9][a-z0-9-]*\.itch\.io\/[a-z0-9]/i;
 /** One search result or looked-up page: what it is, whether it's already in Purchases, and what can be done. */
 function itchResult(r) {
   const lib = r.library && !r.library.hidden ? r.library : null;
-  const paid = r.free === false || (r.free === undefined && r.price);
   let state = '';
   const actions = [];
   if (lib) {
@@ -651,7 +659,7 @@ function itchResult(r) {
     else if (lib.pending) actions.push(`<button class="btn small primary" data-dl-item="${lib.item_id}">Download</button>`);
     else if (lib.pack_id) actions.push(`<a class="btn small primary" href="#/pack/${lib.pack_id}">Open pack</a>`);
     actions.push(`<a class="btn small" href="${link('/purchases', { status: 'all' })}">${lib.owned ? 'Purchased' : 'In Purchases'}</a>`);
-  } else if (paid) {
+  } else if (!r.free) {
     state = `<span class="chip">${esc(r.price || 'Paid')}</span>`;
     actions.push(`<a class="btn small" href="${esc(r.url)}" target="_blank" rel="noopener" title="Buy or claim it on itch.io, then sync">Open on itch.io</a>`);
   } else {
@@ -659,12 +667,11 @@ function itchResult(r) {
     actions.push(`<button class="btn small primary" data-add-url="${esc(r.url)}" title="Add to Purchases and download">Add &amp; download</button>`);
   }
   const files = (r.files || []).map((f) => `<div class="pfile"><span class="fn">${esc(f.filename)}</span><span class="dim">${fmtSize(f.size)}</span></div>`).join('');
-  const by = r.author ? `by ${r.author_url ? `<a href="${esc(r.author_url)}" target="_blank" rel="noopener">${esc(r.author)}</a>` : esc(r.author)}` : '';
   return `<div class="purchase">
     <a class="pcover" href="${esc(r.url)}" target="_blank" rel="noopener">${r.cover_url ? `<img src="${esc(r.cover_url)}" alt="" loading="lazy">` : ''}</a>
     <div class="pbody">
-      <div class="ptitle"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>${state}</div>
-      <div class="pmeta">${[by, r.short_text && esc(r.short_text)].filter(Boolean).join(' · ')}</div>
+      <div class="ptitle">${extLink(r.url, esc(r.title))}${state}</div>
+      <div class="pmeta">${[byAuthor(r.author, r.author_url), r.short_text && esc(r.short_text)].filter(Boolean).join(' · ')}</div>
       ${files ? `<div class="pfiles">${files}</div>` : ''}
     </div>
     <div class="pacts" style="display:flex;flex-direction:column;gap:6px;align-items:stretch">${actions.join('')}</div>
@@ -706,29 +713,27 @@ async function viewItchSearch(seq, q) {
 
   // itch.io search returns one page (about 54). More continues with itch.io's free assets tagged with the
   // query, which do page. Free only and Refine filter everything loaded, here in the page.
-  const slug = lookup ? '' : q.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const tag = { results: [], page: 0, more: !!slug, loading: false };
+  const tag = { name: '', results: [], page: 0, more: !lookup && /[a-z0-9]/i.test(q), loading: false };
   $('#itch-results').insertAdjacentHTML('beforebegin', `<div class="refine">
       <input id="refine" type="search" placeholder="Refine results" autocomplete="off">
       <label class="check"><input type="checkbox" id="free-only" ${storedFreeOnly() ? 'checked' : ''}> Free only</label>
       <span class="dim" id="refine-count"></span>
     </div>`);
-  const isFree = (r) => (r.free !== undefined ? r.free : !r.price);  // search lists no price for free and pay-what-you-want
   const render = () => {
     const words = $('#refine').value.toLowerCase().split(/\s+/).filter(Boolean);
     const freeOnly = $('#free-only').checked;
-    const keep = (r) => (!freeOnly || isFree(r) || r.library)
+    const keep = (r) => (!freeOnly || r.free || r.library)
       && words.every((w) => [r.title, r.author, r.short_text].join(' ').toLowerCase().includes(w));
     const shown = results.filter(keep);
     const shownTag = tag.results.filter(keep);
     const total = results.length + tag.results.length;
     const count = shown.length + shownTag.length;
     $('#refine-count').textContent = count === total ? plural(total, 'result') : `${count} of ${total}`;
-    const moreLabel = tag.loading ? 'Loading…' : tag.page ? 'More' : `More: free assets tagged “${slug}”`;
+    const moreLabel = tag.loading ? 'Loading…' : tag.page ? 'More' : `More: free assets tagged “${q}”`;
     $('#itch-results').innerHTML = (shown.length ? shown.map(itchResult).join('')
       : `<div class="empty">${results.length ? 'Nothing matches. Clear the filters to see all results.' : `No search results for “${esc(q)}”.`}</div>`)
-      + (tag.page ? `<h3 class="section-title">Free assets tagged “${esc(slug)}” ${info('From itch.io’s tag pages, most popular first. Tags are set by creators, so this can differ from search.')}</h3>
-          ${shownTag.length ? shownTag.map(itchResult).join('') : `<div class="empty">${tag.results.length ? 'Nothing matches the filters.' : `No free assets are tagged “${esc(slug)}” on itch.io.`}</div>`}` : '')
+      + (tag.page ? `<h3 class="section-title">Free assets tagged “${esc(tag.name)}” ${info('From itch.io’s tag pages, most popular first. Tags are set by creators, so this can differ from search.')}</h3>
+          ${shownTag.length ? shownTag.map(itchResult).join('') : `<div class="empty">${tag.results.length ? 'Nothing matches the filters.' : `No free assets are tagged “${esc(tag.name)}” on itch.io.`}</div>`}` : '')
       + (tag.more ? `<div class="more"><button class="btn" id="itch-more" ${tag.loading ? 'disabled' : ''}>${esc(moreLabel)}</button></div>` : '');
     trackActivity();
   };
@@ -736,7 +741,8 @@ async function viewItchSearch(seq, q) {
     tag.loading = true;
     render();
     try {
-      const data = await api('/api/itch/tag?' + new URLSearchParams({ tag: slug, page: tag.page + 1 }));
+      const data = await api('/api/itch/tag?' + new URLSearchParams({ tag: q, page: tag.page + 1 }));
+      tag.name = data.tag;
       const seen = new Set([...results, ...tag.results].map((r) => r.game_id));
       tag.results.push(...data.results.filter((r) => !seen.has(r.game_id)));
       tag.page += 1;
@@ -861,7 +867,6 @@ async function viewSearch(seq, params) {
   const kind = params.get('kind') || '';
   $('#q').value = q;
   if (params.get('src') === 'itch') return viewItchSearch(seq, q);
-  if (!canReveal) canReveal = (await api('/api/facets')).can_reveal;
   const res = await api('/api/search?' + new URLSearchParams({ q, kind, limit: 200 }));
   if (seq !== routeSeq) return;
   const tabs = [['', 'All'], ['image', 'Images'], ['audio', 'Audio'], ['font', 'Fonts'], ['source', 'Source'], ['doc', 'Docs']];
@@ -886,18 +891,8 @@ async function viewSearch(seq, params) {
   }
   const list = new FileList($('#files'), { showPack: true });
   list.add(res.files);
-  let offset = res.files.length;
-  const more = $('#more');
-  const renderMore = () => {
-    more.innerHTML = offset < res.total ? `<button class="btn">Load more (${(res.total - offset).toLocaleString()} left)</button>` : '';
-  };
-  more.onclick = async () => {
-    const next = await api('/api/search?' + new URLSearchParams({ q, kind, offset, limit: 200 }));
-    offset += next.files.length;
-    list.add(next.files);
-    renderMore();
-  };
-  renderMore();
+  loadMore($('#more'), res.files.length, res.total,
+    (offset) => api('/api/search?' + new URLSearchParams({ q, kind, offset, limit: 200 })), (more) => list.add(more));
 }
 
 $('#search').onsubmit = (e) => {
@@ -1129,7 +1124,7 @@ async function viewSettings(seq) {
         }),
       });
       $('#save-status').textContent = r.rescan ? 'Saved. Scanning…' : 'Saved';
-      if (r.rescan) pollJob('scan', $('#scan-status'), $('#rescan'), 'Scan finished');
+      if (r.rescan) trackActivity();
       refreshNavCount();
       if (s.first_run) location.hash = '#/';
     } catch (err) {
@@ -1142,7 +1137,7 @@ async function viewSettings(seq) {
 // ---------------------------------------------------------------- background activity
 
 let activityTimer = null;
-let activityWas = { download: false, itch: false };
+let activityWas = {};
 
 function downloadText(job) {
   const cur = job.current || '';
@@ -1152,71 +1147,55 @@ function downloadText(job) {
   return `Downloading${n}${pct ? ` · ${pct[1]}%` : '…'}`;
 }
 
-/** Shows downloads and syncs in the header (and on their buttons) while they run, on any page. */
+function scanText(job) {
+  const n = job.total ? ` ${job.done}/${job.total}` : '';
+  return job.current === 'making pack covers' ? `Making covers${n}` : `Scanning${n}`;
+}
+
+/** The message shown when each kind of job finishes. */
+const FINISHED = {
+  scan: (j) => (j.error ? `Scan failed: ${j.error}` : 'Scan finished'),
+  itch: (j) => {
+    const n = j.result?.errors || 0;
+    return j.error ? `Sync failed: ${j.error}` : n ? `Sync finished; ${plural(n, 'purchase')} couldn't be refreshed` : 'Sync finished';
+  },
+  download: (j) => {
+    const r = j.result?.itch;
+    return j.error ? `Download failed: ${j.error}` : r?.cancelled ? 'Downloads cancelled'
+      : r?.failed ? `${plural(r.failed, 'download')} failed` : 'Downloads finished';
+  },
+};
+
+/** Shows scans, syncs and downloads in the header (and on their buttons) while they run, on any page. */
 async function trackActivity() {
   clearTimeout(activityTimer);
   const a = await api('/api/activity').catch(() => null);
   if (!a) return;
-  const { download: dl, itch: sync } = a;
+  const { scan, itch: sync, download: dl } = a;
   const el = $('#activity');
-  el.hidden = !dl.running && !sync.running;
+  el.hidden = !scan.running && !sync.running && !dl.running;
+  el.textContent = dl.running ? downloadText(dl) : sync.running ? 'Syncing itch.io…' : scanText(scan);
+  el.href = dl.running || sync.running ? '#/purchases' : '#/';
   $('#activity-cancel').hidden = !dl.running;
-  el.textContent = dl.running ? downloadText(dl) : 'Syncing itch.io…';
+  $('#rescan').disabled = scan.running;
+  if ($('#dl-all')) $('#dl-all').disabled = dl.running;
+  if ($('#sync')) $('#sync').disabled = sync.running;
   $$('[data-progress-item]').forEach((b) => {
     const st = a.items[b.dataset.progressItem];
     if (st) b.textContent = st === 'running' ? downloadText(dl) : 'Queued…';
   });
-  if ($('#dl-all')) $('#dl-all').disabled = dl.running;
-  if ($('#sync')) $('#sync').disabled = sync.running;
 
-  if (activityWas.download && !dl.running) {
-    const r = dl.result?.itch;
-    toast(dl.error ? `Download failed: ${dl.error}` : r?.cancelled ? 'Downloads cancelled'
-      : r?.failed ? `${plural(r.failed, 'download')} failed` : 'Downloads finished');
-  }
-  if (activityWas.itch && !sync.running) {
-    const n = sync.result?.errors || 0;
-    toast(sync.error ? `Sync failed: ${sync.error}` : n ? `Sync finished; ${plural(n, 'purchase')} couldn't be refreshed` : 'Sync finished');
-  }
-  const finished = (activityWas.download && !dl.running) || (activityWas.itch && !sync.running);
-  activityWas = { download: dl.running, itch: sync.running };
-  if (finished) {
+  const finished = Object.keys(FINISHED).filter((k) => activityWas[k] && !a[k].running);
+  finished.forEach((k) => toast(FINISHED[k](a[k])));
+  activityWas = { scan: scan.running, itch: sync.running, download: dl.running };
+  if (finished.length) {
     forgetLibraryViews();
     refreshNavCount();
     // Re-render pages that show purchases or packs; not ones with a form you might be editing.
     const { path } = parseHash();
     if (path === '/' || path.startsWith('/purchases') || path.startsWith('/search')) route();
   }
-  if (dl.running || sync.running) activityTimer = setTimeout(trackActivity, 1000);
-}
-
-// ---------------------------------------------------------------- scanning
-
-const polling = new Set();
-const jobUI = {};
-
-/** Shows a background job's progress in `status`, disables `btn` while it runs, re-renders when it finishes. */
-async function pollJob(name, statusEl, btnEl, doneLabel, wasRunning = false) {
-  if (!wasRunning) jobUI[name] = { status: statusEl, btn: btnEl }; // views re-render; always use the latest elements
-  if (polling.has(name) && !wasRunning) return;
-  polling.add(name);
-  const s = await api(`/api/jobs/${name}`).catch(() => null);
-  const { status, btn } = jobUI[name];
-  if (s && s.running) {
-    btn.disabled = true;
-    status.textContent = s.total ? `${s.current} ${s.done}/${s.total}` : s.current || 'Working…';
-    setTimeout(() => pollJob(name, status, btn, doneLabel, true), 1500);
-    return;
-  }
-  polling.delete(name);
-  btn.disabled = false;
-  if (s && s.error) status.textContent = `Failed: ${s.error}`;
-  else if (wasRunning && s && s.result) {
-    status.textContent = doneLabel;
-    forgetLibraryViews();  // a scan or download may have added or changed packs
-    refreshNavCount();
-    route();
-  } else status.textContent = '';
+  if (!el.hidden) activityTimer = setTimeout(trackActivity, 1000);
 }
 
 $('#activity-cancel').onclick = async () => {
@@ -1227,15 +1206,16 @@ $('#activity-cancel').onclick = async () => {
 
 $('#rescan').onclick = async () => {
   await api('/api/scan', { method: 'POST' });
-  pollJob('scan', $('#scan-status'), $('#rescan'), 'Rescan finished');
+  trackActivity();
 };
 
+// ---------------------------------------------------------------- startup
+
 window.addEventListener('hashchange', route);
-// A new install opens on the setup page.
 api('/api/settings').then((s) => {
-  if (s.first_run && (location.hash || '#/') === '#/') location.hash = '#/settings';
+  canReveal = s.can_reveal;
+  if (s.first_run && (location.hash || '#/') === '#/') location.hash = '#/settings';  // a new install opens on setup
   else route();
 }).catch(route);
-pollJob('scan', $('#scan-status'), $('#rescan'), 'Rescan finished');
 refreshNavCount();
 trackActivity();

@@ -38,6 +38,14 @@ class Config:
     def thumb_dir(self) -> str:
         return os.path.join(self.data_dir, "thumbs")
 
+    def ensure_download_dir(self) -> None:
+        """Make the default download folder on first use. A chosen folder must already exist: it may be on
+        a drive that isn't connected, and creating it locally would hide that."""
+        if self.itch_download_dir == default_download_dir():
+            os.makedirs(self.itch_download_dir, exist_ok=True)
+        elif not os.path.isdir(self.itch_download_dir):
+            raise FileNotFoundError(f"download folder not reachable: {self.itch_download_dir}")
+
     def display_path(self, path: str, member: str | None = None) -> str:
         """Translate a server-side path into the path the user sees (e.g. a mapped network drive)."""
         shown = path
@@ -100,10 +108,10 @@ def load(path: str | None = None) -> Config:
     if os.path.exists(path):
         with open(path, "rb") as f:
             raw = tomllib.load(f)
-    cat = raw.get("catalog", {})
+    paths = raw.get("paths", {})
     srv = raw.get("server", {})
 
-    data = os.path.expanduser(cat.get("data_dir") or data_dir())
+    data = os.path.expanduser(paths.get("data_dir") or data_dir())
     if not os.path.isabs(data):
         data = os.path.join(base, data)
     os.makedirs(data, exist_ok=True)
@@ -124,12 +132,19 @@ def load(path: str | None = None) -> Config:
         # Downloads must be indexed, so the download folder is always part of the library.
         roots.append(Root(label="itch.io downloads", path=download_dir, display=download_dir, containers=[],
                           auto=True))
+    # Packs are grouped by label, so two folders with the same name (e.g. two "assets") need distinct ones.
+    seen: set[str] = set()
+    for r in roots:
+        base, n = r.label, 2
+        while r.label.lower() in seen:
+            r.label, n = f"{base} ({n})", n + 1
+        seen.add(r.label.lower())
     return Config(
         roots=roots,
         data_dir=data,
         host=srv.get("host", "127.0.0.1"),
         port=int(srv.get("port", 8765)),
-        sevenzip=cat.get("sevenzip") or find_7z(),
+        sevenzip=paths.get("sevenzip") or find_7z(),
         itch_download_dir=download_dir,
         itch_sync_hours=float(itch.get("sync_every_hours", 24)),
         itch_auto_download=bool(itch.get("auto_download", False)),

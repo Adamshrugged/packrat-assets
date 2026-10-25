@@ -15,6 +15,8 @@ import urllib.request
 from PIL import Image as PILImage, ImageDraw, ImageFont
 from mcp.server.mcpserver import Image, MCPServer
 
+from .kinds import LISTABLE
+
 BASE = os.environ.get("PACKRAT_URL", "http://localhost:8765").rstrip("/")
 
 INSTRUCTIONS = """\
@@ -36,7 +38,7 @@ Never modify or delete anything in the library itself; it is the user's master c
 mcp = MCPServer("packrat", instructions=INSTRUCTIONS)
 
 
-class CatalogError(Exception):
+class PackratError(Exception):
     pass
 
 
@@ -55,9 +57,9 @@ def _get(path: str, params: dict | None = None, raw: bool = False):
             detail = json.loads(detail).get("detail", detail)
         except ValueError:
             pass
-        raise CatalogError(f"{e.code}: {detail}") from None
+        raise PackratError(f"{e.code}: {detail}") from None
     except urllib.error.URLError:
-        raise CatalogError(f"Packrat isn't reachable at {BASE}. Ask the user to start it "
+        raise PackratError(f"Packrat isn't reachable at {BASE}. Ask the user to start it "
                            f"(run: packrat serve).") from None
     return body if raw else json.loads(body)
 
@@ -225,7 +227,7 @@ def _wrap(text: str, width: int) -> list[str]:
 def _thumb(file_id: int) -> bytes | None:
     try:
         return _get(f"/api/files/{file_id}/thumb", raw=True)
-    except CatalogError:
+    except PackratError:
         return None
 
 
@@ -238,7 +240,7 @@ def preview_files(file_ids: list[int]) -> list:
     for i in ids:
         try:
             label = _short(_get(f"/api/files/{i}/info")["rel"])
-        except CatalogError:
+        except PackratError:
             label = "(unknown file)"
         entries.append((f"#{i} {label}", _thumb(i)))
     return [Image(data=_contact_sheet(entries), format="png"),
@@ -317,7 +319,7 @@ def copy_to_project(destination: str, file_ids: list[int] | None = None, pack_id
     license/usage terms so attribution requirements can be recorded in the project.
     """
     if not os.path.isabs(destination):
-        raise CatalogError("destination must be an absolute path")
+        raise PackratError("destination must be an absolute path")
     jobs: list[tuple[dict, str]] = []
     if file_ids:
         used: set[str] = set()
@@ -341,15 +343,15 @@ def copy_to_project(destination: str, file_ids: list[int] | None = None, pack_id
             if not res["files"] or offset >= res["total"]:
                 break
             if len(jobs) > MAX_COPY_FILES:
-                raise CatalogError(f"More than {MAX_COPY_FILES} files; narrow it down with folder/kind.")
+                raise PackratError(f"More than {MAX_COPY_FILES} files; narrow it down with folder/kind.")
     else:
-        raise CatalogError("give file_ids or pack_id")
+        raise PackratError("give file_ids or pack_id")
 
     dest_root = os.path.abspath(destination)
     written, skipped = [], []
     packs = set()
     for f, rel in jobs:
-        if pack_id is not None and f["ext"] in (".zip", ".rar", ".7z") and not f.get("in_archive"):
+        if pack_id is not None and f["ext"] in LISTABLE and not f.get("in_archive"):
             continue  # an archive inside a folder pack: its contents are listed (and copied) separately
         target = os.path.abspath(os.path.join(dest_root, *rel.split("/")))
         if not target.startswith(dest_root):

@@ -86,8 +86,6 @@ class Client(net.Client):
     def game(self, game_id: str) -> dict:
         return self.get(f"{API}/games/{game_id}").get("game") or {}
 
-    def page_meta(self, url: str) -> dict:
-        return parse_page(self.get(url, auth=False, raw=True).decode("utf-8", "replace"))
 
     def download_url(self, upload_id: str, key_id: str | None) -> str:
         """The API answers with a redirect to a signed storage URL. Read it without following it, so the
@@ -110,11 +108,21 @@ def _key_param(key_id: str | None) -> str:
 
 
 def client_from_secrets() -> Client:
-    values = secrets.load()
-    key = values.get("itch_api_key")
+    key = secrets.itch_key()
     if not key:
         raise ItchError("connect itch.io in Settings first")
-    return Client(key, values)
+    return Client(key, secrets.load())
+
+
+_PUBLIC = Client("", {})  # for public pages: same pacing and retries, never sends a key
+
+
+def fetch_public(url: str) -> str:
+    return _PUBLIC.get(url, auth=False, raw=True).decode("utf-8", "replace")
+
+
+def user_name(user: dict) -> str:
+    return user.get("display_name") or user.get("username") or ""
 
 
 # ------------------------------------------------------------------ page parsing
@@ -173,7 +181,7 @@ def _upsert_items(conn, keys: list[dict]) -> None:
                 "cover_url=excluded.cover_url, classification=excluded.classification, "
                 "purchased_at=min(store_items.purchased_at, excluded.purchased_at)",
                 (str(g.get("id") or k.get("game_id")), str(k["id"]), g.get("title") or "?",
-                 user.get("display_name") or user.get("username") or "", user.get("url") or "",
+                 user_name(user), user.get("url") or "",
                  g.get("url") or "", g.get("cover_url") or "", g.get("classification") or "",
                  k.get("created_at") or "", time.time()),
             )
@@ -186,8 +194,8 @@ def _refresh_item(cfg, client: Client, item, now: float, force: bool) -> str | N
             ups = client.uploads(item["store_id"], item["key_id"])
             with conn:
                 keep = [str(u["id"]) for u in ups]
-                conn.execute(f"DELETE FROM store_files WHERE item_id=? AND upload_id NOT IN "
-                             f"({','.join('?' * len(keep)) or 'NULL'})", (item["id"], *keep))
+                conn.execute(f"DELETE FROM store_files WHERE item_id=? AND upload_id NOT IN ({db.placeholders(keep)})",
+                             (item["id"], *keep))
                 for u in ups:
                     conn.execute(
                         "INSERT INTO store_files(item_id, upload_id, filename, display_name, size, md5, type, "
@@ -200,7 +208,7 @@ def _refresh_item(cfg, client: Client, item, now: float, force: bool) -> str | N
                 conn.execute("UPDATE store_items SET uploads_fetched_at=? WHERE id=?", (now, item["id"]))
         if item["url"] and (force or not item["meta_fetched_at"] or now - item["meta_fetched_at"] > META_MAX_AGE):
             try:
-                meta = client.page_meta(item["url"])
+                meta = parse_page(fetch_public(item["url"]))
             except ItchError as e:
                 if "HTTP 404" not in str(e):
                     raise
@@ -254,16 +262,6 @@ def sync(cfg, progress=None, force: bool = False) -> dict:
     return {"purchases": len(items), "errors": len(errors), "error_samples": errors[:5], **stats}
 
 
-def migrate(conn) -> None:
-    """One-time fixes for data imported by earlier versions."""
-    if db.get_kv(conn, "itch_meta_v2") is None:
-        # parse_page missed the info table after itch.io changed its markup, so tags and licenses were
-        # never stored; mark page info stale so the next sync fetches it again
-        with conn:
-            conn.execute("UPDATE store_items SET meta_fetched_at=NULL WHERE store='itch'")
-        db.set_kv(conn, "itch_meta_v2", time.time())
-
-
 # ------------------------------------------------------------------ free assets (added by URL or search)
 
 # Free downloads don't create a download key, so they never show up in owned-keys. They are stored as itch
@@ -313,8 +311,7 @@ def lookup(url: str) -> dict:
     user = game.get("user") or {}
     return {
         "game_id": gid, "url": game.get("url"), "title": game.get("title"),
-        "author": user.get("display_name") or user.get("username") or "", "author_url": user.get("url") or "",
-        "cover_url": game.get("cover_url") or "", "classification": game.get("classification") or "",
+        "author": user_name(user), "author_url": user.get("url") or "", "cover_url": game.get("cover_url") or "", "classification": game.get("classification") or "",
         "short_text": game.get("short_text") or "", "price": game.get("price_label") or "", "free": free,
         "files": files,
     }
@@ -336,11 +333,10 @@ def add_free(cfg, url: str) -> dict:
             with conn:
                 conn.execute(
                     "INSERT INTO store_items(store, store_id, key_id, title, author, author_url, url, cover_url, "
-                    "classification, purchased_at, first_seen, info) VALUES ('itch',?,NULL,?,?,?,?,?,?,?,?,?)",
-                    (gid, game.get("title") or "?", user.get("display_name") or user.get("username") or "",
-                     user.get("url") or "", game.get("url") or "", game.get("cover_url") or "",
-                     game.get("classification") or "", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                     time.time(), json.dumps({"Source": "Free, added from the catalog"})))
+                    "classification, purchased_at, first_seen) VALUES ('itch',?,NULL,?,?,?,?,?,?,?,?)",
+                    (gid, game.get("title") or "?", user_name(user), user.get("url") or "", game.get("url") or "",
+                     game.get("cover_url") or "", game.get("classification") or "",
+                     time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), time.time()))
         else:
             with conn:
                 conn.execute("UPDATE store_items SET hidden=0 WHERE id=?", (row["id"],))  # adding it again unhides it
@@ -366,7 +362,7 @@ def search(query: str) -> list[dict]:
     query = (query or "").strip()
     if not query:
         return []
-    return parse_cells(_fetch_public(SEARCH_URL + urllib.parse.quote_plus(query)))
+    return parse_cells(fetch_public(SEARCH_URL + urllib.parse.quote_plus(query)))
 
 
 def tag_slug(text: str) -> str:
@@ -380,18 +376,9 @@ def browse_free_tag(tag: str, page: int = 1) -> dict:
     slug = tag_slug(tag)
     if not slug:
         return {"tag": "", "results": [], "more": False}
-    data = json.loads(_fetch_public(f"{FREE_TAG_URL}{slug}?page={max(1, page)}&format=json"))
+    data = json.loads(fetch_public(f"{FREE_TAG_URL}{slug}?page={max(1, page)}&format=json"))
     results = parse_cells(data.get("content") or "")
     return {"tag": slug, "results": results, "more": len(results) >= 36}
-
-
-def _fetch_public(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return r.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise ItchError(f"itch.io didn't respond: {e}") from None
 
 
 def parse_cells(body: str) -> list[dict]:
@@ -404,12 +391,14 @@ def parse_cells(body: str) -> list[dict]:
             continue
         author = re.search(r'class="game_author"><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', cell, re.S)
         cover = re.search(r'data-lazy_src="([^"]+)"', cell)
+        price = _cell_text(cell, "price_value")
         out.append({
             "game_id": gid.group(1), "url": html.unescape(link.group(1) or link.group(2)),
             "title": _cell_text(cell, "title"), "short_text": _cell_text(cell, "game_text"),
             "author": _text(author.group(2)) if author else "", "author_url": author.group(1) if author else "",
             "cover_url": html.unescape(cover.group(1)) if cover else "",
-            "price": _cell_text(cell, "price_value"),  # empty for free (and pay-what-you-want) assets
+            "price": price,
+            "free": not price,  # no price tag: free or pay-what-you-want, both addable without paying
         })
     return out
 
@@ -468,36 +457,33 @@ def match(cfg, conn=None) -> dict:
 SIDE_FILES = re.compile(r"\.(txt|pdf|md|url|yymps|yyz|exe|dmg|apk|html?)$|license|readme|\bhtml\b|demo", re.I)
 
 
-def is_pending(category: str, matched: bool, saved: bool, filename: str, wanted: bool = True) -> bool:
+def is_pending(matched: bool, filename: str) -> bool:
     """The one rule for "this purchased file still needs fetching", used by downloads, the Purchases list
     and its buttons: not yet found in the asset library, and not an extra (readme, installer…)."""
-    if not wanted:
-        return False
     return not matched and not SIDE_FILES.search(filename)
 
 
 def pending_files(conn, item_ids: list[int] | None = None, new_only: bool = False) -> list:
     """itch.io files of the given purchases that still need downloading (see is_pending)."""
-    where, args = ["si.hidden = 0", "si.store = 'itch'"], []  # only itch downloads
+    where, args = ["si.hidden = 0"], []
     if item_ids is not None:
-        where.append(f"si.id IN ({','.join('?' * len(item_ids)) or 'NULL'})")
+        where.append(f"si.id IN ({db.placeholders(item_ids)})")
         args.extend(item_ids)
     if new_only:
         where.append("si.first_seen IS NOT NULL")
     rows = conn.execute(f"SELECT sf.*, si.title FROM store_files sf JOIN store_items si ON si.id = sf.item_id "
                         f"WHERE {' AND '.join(where)} ORDER BY si.purchased_at, sf.filename", args).fetchall()
-    return [r for r in rows if is_pending("asset", r["match_pack_id"] is not None, False, r["filename"])]
+    return [r for r in rows if is_pending(r["match_pack_id"] is not None, r["filename"])]
 
 
 def download_many(cfg, file_ids: list[int], progress=None) -> dict:
-    from .config import default_download_dir
-    if cfg.itch_download_dir == default_download_dir():
-        os.makedirs(cfg.itch_download_dir, exist_ok=True)
-    else:
-        require_dir(cfg.itch_download_dir)  # a chosen folder may be on a drive that isn't connected
+    try:
+        cfg.ensure_download_dir()
+    except FileNotFoundError as e:
+        raise ItchError(str(e)) from None
     conn = db.connect(cfg)
-    rows = {r["id"]: r for r in conn.execute(f"SELECT id, filename, match_pack_id FROM store_files WHERE id IN "
-                                             f"({','.join('?' * len(file_ids)) or 'NULL'})", file_ids)}
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT id, filename, match_pack_id FROM store_files WHERE id IN ({db.placeholders(file_ids)})", file_ids)}
     conn.close()
     # a queued download may find some files already fetched by the one before it
     file_ids = [f for f in file_ids if f in rows and rows[f]["match_pack_id"] is None]
@@ -539,17 +525,9 @@ def sync_and_auto_download(cfg, progress=None) -> dict:
     return result
 
 
-def require_dir(root: str, error=None) -> None:
-    error = error or ItchError
-    if not os.path.isdir(root):
-        raise error(f"download folder not reachable: {root}")
-
-
-def fetch_to(url: str, target: str, progress=None, md5: str | None = None, size_hint: int | None = None,
-             error=None) -> int:
+def fetch_to(url: str, target: str, progress=None, md5: str | None = None, size_hint: int | None = None) -> int:
     """Stream a signed download link (no credentials sent) to target via a .part file. It's kept only if
     complete (the server's Content-Length) and, when an MD5 is given, matching it. Returns the size."""
-    error = error or ItchError
     tmp = target + ".part"
     got = 0
     digest = hashlib.md5() if md5 else None
@@ -565,9 +543,9 @@ def fetch_to(url: str, target: str, progress=None, md5: str | None = None, size_
                 if progress:
                     progress(got, expected or size_hint or 0)
         if expected and got != expected:
-            raise error(f"incomplete download ({got} of {expected} bytes)")
+            raise ItchError(f"incomplete download ({got} of {expected} bytes)")
         if digest and digest.hexdigest() != md5:
-            raise error("checksum mismatch; download discarded")
+            raise ItchError("checksum mismatch; download discarded")
     except BaseException:
         if os.path.exists(tmp):
             os.remove(tmp)  # never leave half-written .part files behind

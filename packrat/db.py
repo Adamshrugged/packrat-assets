@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS store_items(
   ai TEXT DEFAULT '',                -- AI disclosure
   info TEXT DEFAULT '{}',            -- other "More information" rows (json)
   hidden INTEGER DEFAULT 0,
+  first_seen REAL,                   -- when a sync first saw it; NULL for the first import (backlog)
   uploads_fetched_at REAL,
   meta_fetched_at REAL,
   UNIQUE(store, store_id)
@@ -104,14 +105,8 @@ def connect(cfg) -> sqlite3.Connection:
     return conn
 
 
-MIGRATIONS = [
-    ("store_items", "first_seen", "ALTER TABLE store_items ADD COLUMN first_seen REAL"),
-    # asset = game assets (matched against the library); library = books/software/etc. saved to a separate folder
-    ("store_items", "category", "ALTER TABLE store_items ADD COLUMN category TEXT DEFAULT 'asset'"),
-    ("store_files", "saved_path", "ALTER TABLE store_files ADD COLUMN saved_path TEXT"),
-    # 1 = category picked automatically (re-evaluated on each sync); 0 = the user chose it
-    ("store_items", "category_auto", "ALTER TABLE store_items ADD COLUMN category_auto INTEGER DEFAULT 1"),
-]
+# Columns added after a release: (table, column, ALTER TABLE statement). New installs get them from SCHEMA.
+MIGRATIONS: list[tuple[str, str, str]] = []
 
 
 def init(cfg) -> None:
@@ -122,6 +117,11 @@ def init(cfg) -> None:
             conn.execute(sql)
     conn.commit()
     conn.close()
+
+
+def placeholders(values) -> str:
+    """'?,?,?' for an SQL IN (...) list; 'NULL' for an empty one, which matches nothing."""
+    return ",".join("?" * len(values)) or "NULL"
 
 
 def get_kv(conn, key: str, default=None):

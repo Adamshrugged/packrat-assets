@@ -17,6 +17,10 @@ def load() -> dict:
         return tomllib.load(f)
 
 
+def itch_key() -> str | None:
+    return load().get("itch_api_key") or None
+
+
 def redact(text: str, secrets: dict) -> str:
     for value in secrets.values():
         if isinstance(value, str) and len(value) >= 8:
