@@ -23,7 +23,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.2  # publishes exact version tags only
         with:
           python-version: ${{ matrix.python }}
       - name: bsdtar (for the .rar fallback test; Windows has it as tar.exe)
@@ -39,6 +39,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.2  # publishes exact version tags only
       - name: itch.io pages still parse
         run: uv run pytest -m live
