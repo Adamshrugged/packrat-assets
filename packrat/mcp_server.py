@@ -1,8 +1,9 @@
 """MCP server exposing the Packrat library to AI agents such as Claude Code.
 
 It talks to the running Packrat server over HTTP (PACKRAT_URL, default http://localhost:8765).
+Register it with Claude Code once:
 
-    python -m packrat.mcp_server
+    claude mcp add packrat --scope user -- packrat mcp
 """
 import io
 import json

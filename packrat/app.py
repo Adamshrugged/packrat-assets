@@ -2,6 +2,7 @@ import json
 import mimetypes
 import os
 import re
+import sys
 import threading
 import time
 
@@ -744,21 +745,11 @@ def create_app(cfg) -> FastAPI:
         from .scanner import scan as _scan
         start_job("scan", lambda p: _scan(cfg, p), "first-time scan…")
 
-    @app.get("/download/mcp_server.py")
-    def download_mcp_server():
-        """The standalone MCP client, so other computers can install it straight from Packrat."""
-        return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_server.py"),
-                            media_type="text/x-python", filename="mcp_server.py")
-
-    @app.get("/install.ps1")
-    def install_ps1(request: Request):
-        from .installers import POWERSHELL, render
-        return Response(render(POWERSHELL, str(request.base_url)), media_type="text/plain; charset=utf-8")
-
-    @app.get("/install.sh")
-    def install_sh(request: Request):
-        from .installers import SHELL, render
-        return Response(render(SHELL, str(request.base_url)), media_type="text/plain; charset=utf-8")
+    @app.get("/api/mcp-command")
+    def mcp_command():
+        """The command that registers Packrat's MCP server with Claude Code. It names this Python by full
+        path, so it works even when the packrat command isn't on PATH (a venv, or an installer)."""
+        return {"command": f'claude mcp add packrat --scope user -- "{sys.executable}" -m packrat mcp'}
 
     app.mount("/", WebFiles(directory=WEB_DIR, html=True), name="web")
     app.add_middleware(TextGZip)

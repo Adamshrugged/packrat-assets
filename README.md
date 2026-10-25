@@ -35,6 +35,12 @@ packrat scan         # re-index the library folders
 
 Settings live in `~/.config/packrat/config.toml` on Linux and `%APPDATA%\packrat\config.toml` on Windows. The database and thumbnails live in `~/.local/share/packrat` or `%LOCALAPPDATA%\packrat`.
 
+To let Claude Code use your library (search, previews, licenses, copying assets into a project), run once:
+
+```
+claude mcp add packrat --scope user -- packrat mcp
+```
+
 Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. It has no login, so don't expose it to your network unless you trust everyone on it.
 
 ## License

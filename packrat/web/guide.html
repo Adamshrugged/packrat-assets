@@ -1,10 +1,5 @@
-<div class="guide-layout" data-os-show="windows">
+<div class="guide-layout">
 <aside class="guide-nav">
-  <div class="os-toggle" role="group" aria-label="Your computer">
-    <span class="os-label">My computer</span>
-    <button type="button" data-set-os="windows">Windows</button>
-    <button type="button" data-set-os="linux">Linux</button>
-  </div>
   <nav>
     <a href="#g-use">Everyday use</a>
     <a href="#g-itch">itch.io purchases</a>
@@ -16,7 +11,7 @@
 
 <article class="guide">
 <h1>Guide</h1>
-<p class="lead">How to browse your library, sync itch.io purchases, and use Packrat from Claude. Commands follow the <b>Windows / Linux</b> switch.</p>
+<p class="lead">How to browse your library, sync itch.io purchases, and use Packrat from Claude.</p>
 
 <h2 id="g-use">Everyday use</h2>
 <h3>Library</h3>
@@ -43,16 +38,9 @@
 </ul>
 
 <h2 id="g-claude-connect">Connect Claude</h2>
-<p>Packrat includes an MCP server that gives Claude Code tools to search your library, view previews, read license files, and copy assets into the project you're working in. Register it once per computer; it applies to all your projects. Packrat must be running.</p>
-<div data-os="windows">
-<p>In PowerShell:</p>
-<pre class="prompt"><code>irm http://localhost:8765/install.ps1 | iex</code></pre>
-</div>
-<div data-os="linux">
-<p>In a terminal:</p>
-<pre class="prompt"><code>curl -fsSL http://localhost:8765/install.sh | sh</code></pre>
-</div>
-<p>Then restart Claude Code and type <code>/mcp</code>. You should see <b>packrat ✔ connected</b>. To remove it: <code>claude mcp remove packrat -s user</code>.</p>
+<p>Packrat includes an MCP server that lets Claude Code search your library, view previews, read licenses and copy assets into your project. Run this once in a terminal (PowerShell on Windows); it applies to all your projects:</p>
+<pre class="prompt"><code data-mcp-command>claude mcp add packrat --scope user -- packrat mcp</code></pre>
+<p>Restart Claude Code and type <code>/mcp</code>: you should see <b>packrat ✔ connected</b>. Packrat must be running while you use it. To remove it: <code>claude mcp remove packrat -s user</code>.</p>
 
 <h2 id="g-claude-use">Using it from Claude</h2>
 <p>Say <b>"my Packrat library"</b> in the request so Claude reaches for the Packrat tools. Claude searches, looks at contact sheets before choosing, checks licenses, and copies files into the project. It never changes the library itself.</p>
@@ -81,7 +69,7 @@ and record the license terms of anything used in CREDITS.md.</code></pre>
 <h2 id="g-trouble">Troubleshooting</h2>
 <dl class="trouble">
   <dt>Claude doesn't use Packrat, or <code>/mcp</code> shows packrat as failed</dt>
-  <dd>Check that this page opens in a browser on that computer. If it does, run the command from <a href="#g-claude-connect">Connect Claude</a> again, then restart Claude Code. Say "my Packrat library" in requests.</dd>
+  <dd>Check that Packrat is running (this page opens). Then run <code>claude mcp remove packrat -s user</code>, run the command from <a href="#g-claude-connect">Connect Claude</a> again and restart Claude Code. Say "my Packrat library" in requests.</dd>
 
   <dt>itch.io sync fails or says the API key is missing</dt>
   <dd>Create a new API key on itch.io (<i>Settings → API keys</i>) and paste it in Packrat's <b>Settings</b>.</dd>

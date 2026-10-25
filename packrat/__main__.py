@@ -15,7 +15,18 @@ def main() -> None:
     it.add_argument("--force", action="store_true", help="re-fetch file lists and page info for everything")
     th = sub.add_parser("thumbs", help="pre-generate thumbnails")
     th.add_argument("--all", action="store_true", help="every image, not just pack covers")
+    mc = sub.add_parser("mcp", help="run the MCP server for AI agents (Packrat must be running)")
+    mc.add_argument("--url", help="Packrat's address (default: http://localhost:<port from config>)")
     args = ap.parse_args()
+
+    if args.cmd == "mcp":
+        # stdout carries the MCP protocol, so nothing else may print there.
+        import os
+        os.environ["PACKRAT_URL"] = (args.url or os.environ.get("PACKRAT_URL")
+                                     or f"http://localhost:{config.load(args.config).port}")
+        from .mcp_server import main as mcp_main
+        mcp_main()
+        return
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     cfg = config.load(args.config)

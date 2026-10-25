@@ -804,14 +804,6 @@ function measureHeader() {
 }
 window.addEventListener('resize', measureHeader);
 
-function storedOS() {
-  try {
-    const v = localStorage.getItem('guide-os');
-    if (v === 'windows' || v === 'linux') return v;
-  } catch { /* storage unavailable */ }
-  return /Windows/i.test(navigator.userAgent) ? 'windows' : 'linux';
-}
-
 async function viewGuide(seq, params) {
   const html = await (await fetch('guide.html', { cache: 'no-cache' })).text();
   if (seq !== routeSeq) return;
@@ -819,14 +811,8 @@ async function viewGuide(seq, params) {
   const layout = $('.guide-layout', view);
   measureHeader();
 
-  // Windows / Linux switch for commands run on your own computer.
-  const setOS = (os) => {
-    layout.dataset.osShow = os;
-    $$('[data-set-os]', layout).forEach((b) => b.classList.toggle('on', b.dataset.setOs === os));
-    try { localStorage.setItem('guide-os', os); } catch { /* storage unavailable */ }
-  };
-  $$('[data-set-os]', layout).forEach((b) => { b.onclick = () => setOS(b.dataset.setOs); });
-  setOS(storedOS());
+  // The exact registration command for this install (full path to its Python).
+  api('/api/mcp-command').then((r) => { const c = $('[data-mcp-command]', view); if (c) c.textContent = r.command; }).catch(() => {});
 
   // Section links (#g-…) scroll within the page and update the address without re-rendering.
   const go = (id, smooth = true) => {
