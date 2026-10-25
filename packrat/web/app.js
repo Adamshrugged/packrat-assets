@@ -116,6 +116,8 @@ async function route() {
   else shownLibrary = null;
   const m = path.match(/^\/pack\/(\d+)/);
   if (!path.startsWith('/search')) $('#q').value = '';
+  $('#q').placeholder = path.startsWith('/search') && params.get('src') === 'itch'
+    ? 'Search itch.io or paste a link' : 'Search packs and files…  ( / )';
   if (!path.startsWith('/guide')) guideObserver?.disconnect();
   const section = ['purchases', 'guide', 'settings'].find((n) => path.startsWith(`/${n}`)) || 'library';
   $$('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === section));
@@ -125,7 +127,7 @@ async function route() {
     else if (path.startsWith('/settings')) await viewSettings(seq);
     else if (m) await viewPack(seq, +m[1], params);
     else if (path.startsWith('/search')) await viewSearch(seq, params);
-    else if (path.startsWith('/purchases/add')) await viewAddItch(seq, params);
+    else if (path.startsWith('/purchases/add')) location.replace(link('/search', { q: params.get('q') || '', src: 'itch' }));
     else if (path.startsWith('/purchases')) await viewPurchases(seq, params);
     else restored = await viewHome(seq, params, hash);
   } catch (e) {
@@ -152,6 +154,7 @@ function packCard(p) {
     ext && `<span class="badge">${esc(ext)}</span>`,
     p.dupes ? `<span class="badge" title="Same pack found elsewhere">×${p.dupes + 1}</span>` : '',
     p.hits ? `<span class="badge">${plural(p.hits, 'match')}</span>` : '',
+    p.new ? '<span class="badge new">New</span>' : '',
     p.favorite ? '<span class="badge fav">★</span>' : '',
   ].join('');
   return `<a class="card" href="#/pack/${p.id}">
@@ -185,13 +188,14 @@ async function viewHome(seq, params, hash) {
     return false;
   }
 
-  const title = [cur.root, cur.type, cur.tag && `#${cur.tag}`, cur.fav && 'favorites'].filter(Boolean).join(' · ') || 'All packs';
+  const title = [cur.new && 'Recently added', cur.root, cur.type, cur.tag && `#${cur.tag}`, cur.fav && 'favorites'].filter(Boolean).join(' · ') || 'All packs';
   view.innerHTML = `<div class="layout">
     <aside class="side">
       <div>
         <h4>Library</h4>
-        <a href="#/" class="${!cur.root && !cur.type && !cur.tag && !cur.fav ? 'on' : ''}"><span>All packs</span><span class="n">${t.packs}</span></a>
+        <a href="#/" class="${!cur.root && !cur.type && !cur.tag && !cur.fav && !cur.new ? 'on' : ''}"><span>All packs</span><span class="n">${t.packs}</span></a>
         ${facets.roots.map((r) => item('root', r.name, r.name, r.count)).join('')}
+        ${t.new ? item('new', 1, 'Recently added', t.new) : ''}
         ${item('fav', 1, '★ Favorites', t.favorites || 0)}
         <h4>Contains</h4>
         ${item('type', 'images', 'Images', t.with_images)}
@@ -495,7 +499,8 @@ function purchaseRow(it) {
   const meta = [by, bought && `${it.free ? 'added' : 'bought'} ${bought}`, it.license && esc(it.license), it.ai && `AI: ${esc(it.ai)}`]
     .filter(Boolean).join(' · ');
   const actions = [];
-  if (hasPending(it)) actions.push(`<button class="btn small primary" data-dl-item="${it.id}">Download</button>`);
+  if (it.downloading) actions.push(`<button class="btn small primary" disabled data-progress-item="${it.id}">${it.downloading === 'running' ? 'Downloading…' : 'Queued…'}</button>`);
+  else if (hasPending(it)) actions.push(`<button class="btn small primary" data-dl-item="${it.id}">Download</button>`);
   actions.push(`<button class="btn small" data-hide="${it.id}" data-hidden="${it.hidden ? 1 : 0}" title="Hide from these lists">${it.hidden ? 'Unhide' : 'Hide'}</button>`);
   return `<div class="purchase" data-item="${it.id}">
     <a class="pcover" href="${esc(link_)}" target="_blank" rel="noopener">${it.cover_url ? `<img src="${esc(it.cover_url)}" alt="" loading="lazy">` : ''}</a>
@@ -529,7 +534,6 @@ async function viewPurchases(seq, params) {
           <div class="dim" style="font-size:12.5px">${summary.download_dir ? `Saves to <code class="mono">${esc(summary.download_dir)}</code>.` : 'Choose a download folder in <a href="#/settings">Settings</a>.'}
           ${summary.sync_every_hours ? `Syncs every ${summary.sync_every_hours} h${summary.auto_download ? ' and downloads new purchases' : ''}.` : ''}
           ${summary.last_sync ? `Last synced ${new Date(summary.last_sync * 1000).toLocaleString()}.` : ''}</div></div>
-        <span id="dl-status" class="dim"></span>
         <button class="btn primary" id="dl-all">Download all missing</button>
       </div>` : '';
 
@@ -542,8 +546,8 @@ async function viewPurchases(seq, params) {
         <select id="psort" aria-label="Sort">
           <option value="recent">Recently bought</option><option value="title">Title</option><option value="author">Author</option>
         </select>
-        <a class="btn" href="#/purchases/add" title="Add free assets from itch.io">Add from itch.io</a>
-        <span id="sync-status" class="dim"></span><button class="btn" id="sync">Sync itch.io</button>
+        <a class="btn" href="#/search?src=itch" title="Add free assets from itch.io">Add from itch.io</a>
+        <button class="btn" id="sync">Sync itch.io</button>
       </div>
       <div class="dim" id="bulk-bar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:-4px 0 10px;font-size:12.5px" hidden>
         <span id="shown-count"></span>
@@ -587,7 +591,9 @@ async function viewPurchases(seq, params) {
       if (btn) btn.disabled = true;
       const job = await api('/api/store/download', { method: 'POST', body: JSON.stringify(body) });
       toast(job.queued_behind ? 'Queued after the current download' : 'Download started');
-      watchDownloads();
+      const row = btn && btn.closest('.purchase');
+      if (row && btn.dataset.dlItem) btn.dataset.progressItem = row.dataset.item;
+      trackActivity();
     } catch (err) {
       toast(err.message);
       if (btn) btn.disabled = false;
@@ -620,11 +626,10 @@ async function viewPurchases(seq, params) {
   };
   $('#sync').onclick = async () => {
     await api('/api/store/sync', { method: 'POST' });
-    pollJob('itch', $('#sync-status'), $('#sync'), 'Synced');
+    trackActivity();
   };
-  pollJob('itch', $('#sync-status'), $('#sync'), 'Synced');
   render();
-  watchDownloads();
+  trackActivity();
 }
 
 // ---------------------------------------------------------------- add free itch.io assets
@@ -639,7 +644,9 @@ function itchResult(r) {
   const actions = [];
   if (lib) {
     state = `<span class="pill st-${lib.status}">${STATUS[lib.status]}</span>`;
-    if (lib.pending) actions.push(`<button class="btn small primary" data-dl-item="${lib.item_id}">Download</button>`);
+    if (lib.downloading) actions.push(`<button class="btn small primary" disabled data-progress-item="${lib.item_id}">${lib.downloading === 'running' ? 'Downloading…' : 'Queued…'}</button>`);
+    else if (lib.pending) actions.push(`<button class="btn small primary" data-dl-item="${lib.item_id}">Download</button>`);
+    else if (lib.pack_id) actions.push(`<a class="btn small primary" href="#/pack/${lib.pack_id}">Open pack</a>`);
     actions.push(`<a class="btn small" href="${link('/purchases', { status: 'all' })}">${lib.owned ? 'Purchased' : 'In Purchases'}</a>`);
   } else if (paid) {
     state = `<span class="chip">${esc(r.price || 'Paid')}</span>`;
@@ -661,32 +668,26 @@ function itchResult(r) {
   </div>`;
 }
 
-async function viewAddItch(seq, params) {
-  const q = params.get('q') || '';
-  view.innerHTML = `<div class="layout" style="grid-template-columns:1fr">
-    <section>
-      <div class="toolbar">
-        <h2>Add from itch.io</h2>
-        <a class="btn small" href="#/purchases">Back to Purchases</a>
-        <span class="grow"></span>
-        <span id="dl-status" class="dim"></span>
-      </div>
-      <form id="itch-form" class="panel" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input id="itch-q" type="search" value="${esc(q)}" placeholder="Search itch.io or paste a page link" autocomplete="off"
-          style="flex:1;min-width:240px;padding:5px 9px;border-radius:7px;border:1px solid var(--border);background:var(--panel)">
-        <button class="btn primary" type="submit">${ITCH_PAGE.test(q) ? 'Look up' : 'Search'}</button>
-        ${info('Free: downloads into your library. Paid: opens on itch.io; sync after buying.', 'right')}
-      </form>
-      <div class="plist" id="itch-results">${q ? `<div class="empty">${ITCH_PAGE.test(q) ? 'Looking up the page…' : 'Searching itch.io…'}</div>` : ''}</div>
+/** The search page's tabs: the same query in your library or on itch.io. */
+function searchTabs(q, src) {
+  return `<nav class="tabs src-tabs">
+    <a href="${link('/search', { q })}" class="${src ? '' : 'on'}">Your library</a>
+    <a href="${link('/search', { q, src: 'itch' })}" class="${src === 'itch' ? 'on' : ''}">itch.io</a>
+    <span class="grow"></span>${src === 'itch' ? info('Free: downloads into your library. Paid: opens on itch.io; sync after buying.', 'right') : ''}
+  </nav>`;
+}
+
+function storedFreeOnly() {
+  try { return localStorage.getItem('itch-free-only') !== '0'; } catch { return true; }
+}
+
+async function viewItchSearch(seq, q) {
+  view.innerHTML = `<div class="layout" style="grid-template-columns:1fr"><section>
+      ${searchTabs(q, 'itch')}
+      <div class="plist" id="itch-results"><div class="empty">${!q ? 'Search itch.io for assets, or paste a page link.'
+        : ITCH_PAGE.test(q) ? 'Looking up the page…' : 'Searching itch.io…'}</div></div>
     </section></div>`;
-  const input = $('#itch-q');
-  input.oninput = () => { $('#itch-form button').textContent = ITCH_PAGE.test(input.value.trim()) ? 'Look up' : 'Search'; };
-  $('#itch-form').onsubmit = (e) => {
-    e.preventDefault();
-    location.hash = link('/purchases/add', { q: input.value.trim() });
-  };
-  watchDownloads();
-  if (!q) { input.focus(); return; }
+  if (!q) { $('#q').focus(); return; }
 
   let results;
   try {
@@ -698,9 +699,33 @@ async function viewAddItch(seq, params) {
     return;
   }
   if (seq !== routeSeq) return;
-  $('#itch-results').innerHTML = results.length
-    ? results.map(itchResult).join('')
-    : `<div class="empty">No assets found for “${esc(q)}”.</div>`;
+  if (!results.length) {
+    $('#itch-results').innerHTML = `<div class="empty">No assets found for “${esc(q)}”.</div>`;
+    return;
+  }
+  // itch.io search can't filter by price, so Free only and Refine filter the results here.
+  $('#itch-results').insertAdjacentHTML('beforebegin', `<div class="refine">
+      <input id="refine" type="search" placeholder="Refine results" autocomplete="off">
+      <label class="check"><input type="checkbox" id="free-only" ${storedFreeOnly() ? 'checked' : ''}> Free only</label>
+      <span class="dim" id="refine-count"></span>
+    </div>`);
+  const isFree = (r) => (r.free !== undefined ? r.free : !r.price);  // search lists no price for free and pay-what-you-want
+  const render = () => {
+    const words = $('#refine').value.toLowerCase().split(/\s+/).filter(Boolean);
+    const freeOnly = $('#free-only').checked;
+    const shown = results.filter((r) => (!freeOnly || isFree(r) || r.library)
+      && words.every((w) => [r.title, r.author, r.short_text].join(' ').toLowerCase().includes(w)));
+    $('#refine-count').textContent = shown.length === results.length ? plural(results.length, 'result') : `${shown.length} of ${results.length}`;
+    $('#itch-results').innerHTML = shown.length ? shown.map(itchResult).join('')
+      : '<div class="empty">Nothing matches. Clear the filters to see all results.</div>';
+    trackActivity();
+  };
+  $('#refine').oninput = render;
+  $('#free-only').onchange = () => {
+    try { localStorage.setItem('itch-free-only', $('#free-only').checked ? '1' : '0'); } catch { /* storage unavailable */ }
+    render();
+  };
+  render();
 
   $('#itch-results').onclick = async (e) => {
     const add = e.target.closest('[data-add-url]');
@@ -711,35 +736,23 @@ async function viewAddItch(seq, params) {
     btn.disabled = true;
     btn.textContent = add ? 'Adding…' : 'Starting…';
     try {
+      let itemId = dl && +dl.dataset.dlItem;
       if (dl) {
-        const job = await api('/api/store/download', { method: 'POST', body: JSON.stringify({ item_ids: [+dl.dataset.dlItem] }) });
-        btn.textContent = job.queued_behind ? 'Queued…' : 'Downloading…';
-        watchDownloads();
-        return;
-      }
-      const r = await api('/api/itch/add', { method: 'POST', body: JSON.stringify({ url: add.dataset.addUrl }) });
-      refreshNavCount();
-      if (r.download === 'none') {
-        toast(`Added ${r.title}`);
-        route();
+        await api('/api/store/download', { method: 'POST', body: JSON.stringify({ item_ids: [itemId] }) });
       } else {
-        btn.textContent = r.download === 'queued' ? 'Queued…' : 'Downloading…';
-        toast(r.download === 'queued' ? `Added ${r.title}; queued after the current download` : `Added ${r.title}`);
-        watchDownloads();  // re-renders this page when the download (and indexing) finishes
+        const r = await api('/api/itch/add', { method: 'POST', body: JSON.stringify({ url: add.dataset.addUrl }) });
+        refreshNavCount();
+        if (r.download === 'none') { toast(`Added ${r.title}`); route(); return; }
+        itemId = r.item_id;
       }
+      btn.dataset.progressItem = itemId;  // trackActivity shows progress here, then re-renders with "Open pack"
+      trackActivity();
     } catch (err) {
       toast(err.message);
       btn.disabled = false;
       btn.textContent = label;
     }
   };
-}
-
-function watchDownloads() {
-  // The download job reports in the page's bar when present, otherwise in the header.
-  const status = $('#dl-status') || $('#scan-status');
-  const btn = $('#dl-all') || document.createElement('button');
-  pollJob('download', status, btn, 'Downloads finished');
 }
 
 async function refreshNavCount() {
@@ -830,19 +843,21 @@ async function viewSearch(seq, params) {
   const q = params.get('q') || '';
   const kind = params.get('kind') || '';
   $('#q').value = q;
+  if (params.get('src') === 'itch') return viewItchSearch(seq, q);
   if (!canReveal) canReveal = (await api('/api/facets')).can_reveal;
   const res = await api('/api/search?' + new URLSearchParams({ q, kind, limit: 200 }));
   if (seq !== routeSeq) return;
   const tabs = [['', 'All'], ['image', 'Images'], ['audio', 'Audio'], ['font', 'Fonts'], ['source', 'Source'], ['doc', 'Docs']];
   view.innerHTML = `<div class="layout" style="grid-template-columns:1fr">
     <section>
+      ${searchTabs(q, '')}
       ${res.packs.length ? `<h3 class="section-title">Packs <span class="dim">${res.packs.length}</span></h3>
         <div class="grid compact" id="pack-hits">${res.packs.slice(0, 12).map(packCard).join('')}</div>
         ${res.packs.length > 12 ? `<div class="more"><button class="btn" id="all-packs">Show all ${res.packs.length} packs</button></div>` : ''}` : ''}
       <h3 class="section-title">Files <span class="dim">${res.total.toLocaleString()}</span></h3>
       <nav class="tabs">${tabs.map(([v, l]) => `<a href="${link('/search', { q, kind: v })}" class="${kind === v ? 'on' : ''}">${l}</a>`).join('')}</nav>
       <div id="files"></div>
-      ${!res.total ? `<div class="empty">No files match “${esc(q)}”.</div>` : ''}
+      ${!res.total ? `<div class="empty">No files match “${esc(q)}”.${res.packs.length ? '' : ` <a href="${link('/search', { q, src: 'itch' })}">Search itch.io</a>`}</div>` : ''}
       <div class="more" id="more"></div>
     </section></div>`;
   const allPacks = $('#all-packs');
@@ -871,7 +886,9 @@ async function viewSearch(seq, params) {
 $('#search').onsubmit = (e) => {
   e.preventDefault();
   const q = $('#q').value.trim();
-  location.hash = q ? link('/search', { q }) : '#/';
+  const here = parseHash();
+  const itch = ITCH_PAGE.test(q) || (here.path.startsWith('/search') && here.params.get('src') === 'itch');
+  location.hash = q || itch ? link('/search', { q, src: itch ? 'itch' : '' }) : '#/';
 };
 document.addEventListener('keydown', (e) => {
   if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
@@ -1061,8 +1078,9 @@ async function viewSettings(seq) {
         save.disabled = true;
         try {
           const r = await api('/api/settings/itch-key', { method: 'POST', body: JSON.stringify({ key: $('#key').value }) });
-          toast(`Connected${r.itch.user ? ` as ${r.itch.user}` : ''}`);
+          toast(`Connected${r.itch.user ? ` as ${r.itch.user}` : ''}. Syncing purchases…`);
           route();
+          trackActivity();
         } catch (e) {
           toast(e.message);
           save.disabled = false;
@@ -1102,6 +1120,52 @@ async function viewSettings(seq) {
     }
     btn.disabled = false;
   };
+}
+
+// ---------------------------------------------------------------- background activity
+
+let activityTimer = null;
+let activityWas = { download: false, itch: false };
+
+function downloadText(job) {
+  const cur = job.current || '';
+  if (cur.startsWith('Indexing')) return 'Indexing…';
+  const pct = /(\d+)%$/.exec(cur);
+  const n = job.total > 1 ? ` ${Math.min(job.done + 1, job.total)}/${job.total}` : '';
+  return `Downloading${n}${pct ? ` · ${pct[1]}%` : '…'}`;
+}
+
+/** Shows downloads and syncs in the header (and on their buttons) while they run, on any page. */
+async function trackActivity() {
+  clearTimeout(activityTimer);
+  const a = await api('/api/activity').catch(() => null);
+  if (!a) return;
+  const { download: dl, itch: sync } = a;
+  const el = $('#activity');
+  el.hidden = !dl.running && !sync.running;
+  el.textContent = dl.running ? downloadText(dl) : 'Syncing itch.io…';
+  $$('[data-progress-item]').forEach((b) => {
+    const st = a.items[b.dataset.progressItem];
+    if (st) b.textContent = st === 'running' ? downloadText(dl) : 'Queued…';
+  });
+  if ($('#dl-all')) $('#dl-all').disabled = dl.running;
+  if ($('#sync')) $('#sync').disabled = sync.running;
+
+  if (activityWas.download && !dl.running) {
+    const r = dl.result?.itch;
+    toast(dl.error ? `Download failed: ${dl.error}` : r?.failed ? `${plural(r.failed, 'download')} failed` : 'Downloads finished');
+  }
+  if (activityWas.itch && !sync.running) toast(sync.error ? `Sync failed: ${sync.error}` : 'Sync finished');
+  const finished = (activityWas.download && !dl.running) || (activityWas.itch && !sync.running);
+  activityWas = { download: dl.running, itch: sync.running };
+  if (finished) {
+    forgetLibraryViews();
+    refreshNavCount();
+    // Re-render pages that show purchases or packs; not ones with a form you might be editing.
+    const { path } = parseHash();
+    if (path === '/' || path.startsWith('/purchases') || path.startsWith('/search')) route();
+  }
+  if (dl.running || sync.running) activityTimer = setTimeout(trackActivity, 1000);
 }
 
 // ---------------------------------------------------------------- scanning
@@ -1146,3 +1210,4 @@ api('/api/settings').then((s) => {
 }).catch(route);
 pollJob('scan', $('#scan-status'), $('#rescan'), 'Rescan finished');
 refreshNavCount();
+trackActivity();

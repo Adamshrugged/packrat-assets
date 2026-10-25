@@ -53,7 +53,7 @@ def save(cfg, roots: list[dict], itch: dict, server: dict | None = None) -> None
         "server": srv,
         "itch": {"download_dir": itch.get("download_dir") if itch.get("download_dir") != config.default_download_dir()
                  else None,
-                 "sync_every_hours": float(itch.get("sync_every_hours") or 0),
+                 "sync_every_hours": float(itch.get("sync_every_hours") or 0),  # 0 = off
                  "auto_download": bool(itch.get("auto_download"))},
         "roots": [{"label": r.get("label") or None, "path": r["path"],
                    "display": r.get("display") or None, "containers": r.get("containers") or None}

@@ -25,7 +25,7 @@ class Config:
     port: int
     sevenzip: str | None
     itch_download_dir: str | None = None
-    itch_sync_hours: float = 0
+    itch_sync_hours: float = 24
     itch_auto_download: bool = False
     allowed_hosts: list[str] = field(default_factory=list)
     source: str = ""  # the config.toml this was loaded from (it may not exist yet)
@@ -131,7 +131,7 @@ def load(path: str | None = None) -> Config:
         port=int(srv.get("port", 8765)),
         sevenzip=cat.get("sevenzip") or find_7z(),
         itch_download_dir=download_dir,
-        itch_sync_hours=float(itch.get("sync_every_hours", 0)),
+        itch_sync_hours=float(itch.get("sync_every_hours", 24)),
         itch_auto_download=bool(itch.get("auto_download", False)),
         allowed_hosts=[h.lower() for h in srv.get("allowed_hosts", [])],
         source=path,

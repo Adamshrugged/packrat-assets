@@ -28,7 +28,7 @@ for _type, _ext in [("audio/ogg", ".ogg"), ("audio/wav", ".wav"), ("font/ttf", "
 PACK_SORTS = {
     "name": "p.name COLLATE NOCASE",
     "size": "p.size DESC",
-    "recent": "p.mtime DESC",
+    "recent": "p.first_seen DESC, p.mtime DESC",
     "rating": "p.rating DESC, p.name COLLATE NOCASE",
 }
 TYPE_FILTERS = {"images": "p.image_count > 0", "audio": "p.audio_count > 0", "fonts": "p.font_count > 0"}
@@ -59,8 +59,14 @@ def create_app(cfg) -> FastAPI:
     def conn():
         return db.connect(cfg)
 
-    def pack_out(r) -> dict:
+    def new_since(c) -> float:
+        """Packs first seen after this are "new": the last 7 days, but not the first scan of a library."""
+        first = c.execute("SELECT min(first_seen) FROM packs").fetchone()[0] or 0
+        return max(time.time() - 7 * 86400, first + 3600)
+
+    def pack_out(r, since: float | None = None) -> dict:
         d = dict(r)
+        d["new"] = since is not None and (d.get("first_seen") or 0) > since
         d["display_path"] = cfg.display_path(d["path"])
         d["tags"] = split_tags(d["tags"])
         d["auto_tags"] = split_tags(d["auto_tags"])
@@ -108,6 +114,8 @@ def create_app(cfg) -> FastAPI:
             "sum(CASE WHEN font_count>0 THEN 1 ELSE 0 END) AS with_fonts "
             "FROM packs WHERE missing=0").fetchone())
         missing = c.execute("SELECT count(*) FROM packs WHERE missing=1").fetchone()[0]
+        totals["new"] = c.execute("SELECT count(*) FROM packs WHERE missing=0 AND first_seen > ?",
+                                  (new_since(c),)).fetchone()[0]
         return {
             "roots": roots,
             "tags": sorted(({"name": k, "count": v} for k, v in tag_counts.items()),
@@ -119,8 +127,14 @@ def create_app(cfg) -> FastAPI:
 
     @app.get("/api/packs")
     def list_packs(root: str = "", type: str = "", tag: str = "", fav: bool = False, sort: str = "name",
-                   missing: bool = False):
+                   missing: bool = False, new: bool = False):
+        c = conn()
+        since = new_since(c)
         where, args = ["p.missing = ?"], [1 if missing else 0]
+        if new:
+            where.append("p.first_seen > ?")
+            args.append(since)
+            sort = "recent"
         if root:
             where.append("p.root = ?")
             args.append(root)
@@ -134,7 +148,7 @@ def create_app(cfg) -> FastAPI:
         sql = (f"SELECT p.*, (SELECT count(*) FROM packs d WHERE d.norm_name = p.norm_name AND d.id <> p.id "
                f"AND d.missing = 0) AS dupes FROM packs p WHERE {' AND '.join(where)} "
                f"ORDER BY {PACK_SORTS.get(sort, PACK_SORTS['name'])}")
-        return [pack_out(r) for r in conn().execute(sql, args)]
+        return [pack_out(r, since) for r in c.execute(sql, args)]
 
     @app.get("/api/packs/{pack_id}")
     def get_pack(pack_id: int):
@@ -371,6 +385,8 @@ def create_app(cfg) -> FastAPI:
                 f["pending"] = is_pending(d["category"], bool(f["pack_id"]), f["saved"], f["filename"],
                                           f.get("wanted", True))
             d["status"] = item_status(d["files"], d["category"])
+            d["downloading"] = downloads.get(d["id"])
+            d["pack_id"] = next((f["pack_id"] for f in d["files"] if f["pack_id"] and not f["extra"]), None)
         return list(items.values())
 
     @app.get("/api/store/items")
@@ -432,7 +448,6 @@ def create_app(cfg) -> FastAPI:
     @app.post("/api/store/download")
     def store_download(req: DownloadRequest):
         """Download missing itch.io files into the download folder."""
-        from .itch import download_many
         c = conn()
         if req.file_ids:
             rows = c.execute(f"SELECT sf.id, si.store FROM store_files sf JOIN store_items si ON si.id = sf.item_id "
@@ -445,8 +460,32 @@ def create_app(cfg) -> FastAPI:
             raise HTTPException(400, "nothing selected")
         if not itch_ids:
             raise HTTPException(400, "nothing left to download")
-        return start_job("download", lambda p: {"itch": download_many(cfg, itch_ids, p)},
-                         f"Queued {len(itch_ids)} files…", queue=True)
+        return start_download(itch_ids)
+
+    downloads: dict[int, str] = {}  # item id -> "queued" | "running", while its files download
+
+    def start_download(file_ids: list[int]) -> dict:
+        from .itch import download_many
+        item_ids = [r[0] for r in conn().execute(
+            f"SELECT DISTINCT item_id FROM store_files WHERE id IN ({','.join('?' * len(file_ids))})", file_ids)]
+        for i in item_ids:
+            downloads.setdefault(i, "queued")
+
+        def run(progress):
+            downloads.update(dict.fromkeys(item_ids, "running"))
+            try:
+                return {"itch": download_many(cfg, file_ids, progress)}
+            finally:
+                for i in item_ids:
+                    downloads.pop(i, None)
+        return start_job("download", run, f"Queued {len(file_ids)} files…", queue=True)
+
+    @app.get("/api/activity")
+    def activity():
+        """Background work in progress, for the header indicator and per-item progress."""
+        return {"download": public(jobs.get("download", {"running": False})),
+                "itch": public(jobs.get("itch", {"running": False})),
+                "items": downloads}
 
     # ------------------------------------------------------------ free itch.io assets (search / add by URL)
 
@@ -463,7 +502,8 @@ def create_app(cfg) -> FastAPI:
             return {}
         items = load_items(c, f"store='itch' AND store_id IN ({','.join('?' * len(game_ids))})", game_ids)
         return {i["store_id"]: {"item_id": i["id"], "status": i["status"], "owned": not i["free"],
-                                "hidden": i["hidden"], "pending": any(f["pending"] for f in i["files"])}
+                                "hidden": i["hidden"], "pending": any(f["pending"] for f in i["files"]),
+                                "downloading": i["downloading"], "pack_id": i["pack_id"]}
                 for i in items}
 
     @app.get("/api/itch/search")
@@ -489,13 +529,12 @@ def create_app(cfg) -> FastAPI:
     @app.post("/api/itch/add")
     def itch_add(req: AddFreeRequest):
         """Add a free itch.io asset to Purchases and, unless asked not to, download what isn't in the library."""
-        from .itch import add_free, download_many
+        from .itch import add_free
         added = itch_call(add_free, cfg, req.url)
         ids = added["pending_file_ids"]
         added["download"] = "none"
         if req.download and ids:
-            job = start_job("download", lambda p: {"itch": download_many(cfg, ids, p)}, f"Queued {len(ids)} files…",
-                            queue=True)
+            job = start_download(ids)
             added["download"] = "queued" if job["queued_behind"] else "started"
         return added
 
@@ -650,6 +689,8 @@ def create_app(cfg) -> FastAPI:
             raise HTTPException(400, "itch.io rejected this key. Copy it again from itch.io.") from None
         settings_mod.save_secrets({**secrets_mod.load(), "itch_api_key": key})
         db.set_kv(conn(), "itch_user", user.get("display_name") or user.get("username") or "")
+        from .itch import sync_and_auto_download
+        start_job("itch", lambda p: sync_and_auto_download(cfg, p), "fetching purchases…")
         return settings_out()
 
     @app.delete("/api/settings/itch-key")
@@ -709,10 +750,20 @@ def create_app(cfg) -> FastAPI:
         from .installers import SHELL, render
         return Response(render(SHELL, str(request.base_url)), media_type="text/plain; charset=utf-8")
 
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    app.mount("/", WebFiles(directory=WEB_DIR, html=True), name="web")
     app.add_middleware(TextGZip)
     app.add_middleware(HostGuard, bind_host=cfg.host, allowed_hosts=cfg.allowed_hosts)
     return app
+
+
+class WebFiles(StaticFiles):
+    """The UI's own files. Browsers must re-check them on every load (a cheap 304 if unchanged), or an
+    upgraded Packrat would keep running the old page from the browser cache."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 class TextGZip:
