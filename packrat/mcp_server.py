@@ -18,6 +18,7 @@ from mcp.server.mcpserver import Image, MCPServer
 from .kinds import LISTABLE
 
 BASE = os.environ.get("PACKRAT_URL", "http://localhost:8765").rstrip("/")
+TOKEN = os.environ.get("PACKRAT_TOKEN", "")  # for a Packrat on another computer (network mode)
 
 INSTRUCTIONS = """\
 Packrat: the user's personal library of purchased and free game assets (pixel art, tilesets,
@@ -49,9 +50,13 @@ def _url(path: str, params: dict | None = None) -> str:
 
 def _get(path: str, params: dict | None = None, raw: bool = False):
     try:
-        with urllib.request.urlopen(_url(path, params), timeout=120) as r:
+        headers = {"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}
+        with urllib.request.urlopen(urllib.request.Request(_url(path, params), headers=headers), timeout=120) as r:
             body = r.read()
     except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise PackratError("Packrat needs a valid API token. Copy the command under Settings → Network access "
+                               "in Packrat and run it again.") from None
         detail = e.read().decode("utf-8", "replace")
         try:
             detail = json.loads(detail).get("detail", detail)

@@ -409,6 +409,16 @@ a.tip { cursor: pointer; }
 .tip.right::after { left: auto; right: 0; }
 .tip:hover::after, .tip:focus::after { opacity: 1; }
 
+/* sign-in page and network access */
+.signin { max-width: 380px; margin: 12vh auto 0; padding: 0 16px; }
+.signin .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; margin-bottom: 14px; }
+.signin h2 { margin: 0 0 6px; font-size: 18px; }
+.signin p { margin: 0 0 6px; font-size: 13px; }
+.settings pre.cmd { margin: 4px 0 8px; padding: 8px 10px; border-radius: 7px; background: var(--panel-2);
+  white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+#network .inline .grow { flex: 1; }
+#network #pw-current { margin-bottom: 6px; }
+
 /* folder picker */
 #picker {
   width: min(560px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--border); border-radius: var(--radius);

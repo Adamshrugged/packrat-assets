@@ -15,6 +15,10 @@ let routeSeq = 0;
 async function api(path, opts = {}) {
   if (opts.method && opts.method !== 'GET') forgetLibraryViews();  // an edit may change what the library shows
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (res.status === 401 && !path.startsWith('/api/auth/')) {  // network mode: signed out or session expired
+    location.href = '/login.html';
+    throw new Error('sign in required');
+  }
   if (!res.ok) {
     let msg = res.statusText;
     try { msg = (await res.json()).detail || msg; } catch { /* not json */ }
@@ -1068,8 +1072,24 @@ async function viewSettings(seq) {
         <dt>Database</dt><dd><code>${esc(s.data_dir)}</code></dd>
         <dt>Archive tools</dt><dd>${s.archive_tools.length ? esc(s.archive_tools.join(', ')) : `None found ${info('Install 7-Zip to read .rar and .7z packs.')}`}</dd>
       </dl>
-      ${s.on_network ? '<p class="warn">No login: anyone on your network can change these.</p>' : ''}
     </section>
+
+    ${s.auth.required ? `<section class="panel" id="network">
+      <h3>Network access</h3>
+      <p class="dim">Packrat is open to your network. Other computers sign in with a password; this computer doesn't need to.</p>
+      <form id="pw-form">
+        <label for="pw-new">${s.auth.password_set ? 'Change password' : 'Set a password'}</label>
+        ${s.auth.password_set && !s.auth.local ? '<input id="pw-current" type="password" autocomplete="current-password" placeholder="Current password">' : ''}
+        <div class="inline"><input id="pw-new" type="password" autocomplete="new-password" placeholder="New password (8+ characters)">
+          <input id="pw-again" type="password" autocomplete="new-password" placeholder="Again">
+          <button class="btn">Save</button></div>
+      </form>
+      <label>Claude on other computers ${info('Run this on the other computer, where Packrat is installed too. It includes this Packrat’s API token.')}</label>
+      <pre class="cmd"><code>${esc(s.mcp_remote_command)}</code></pre>
+      <div class="inline"><button type="button" class="btn small" id="copy-cmd">Copy</button>
+        <button type="button" class="btn small" id="new-token" title="Commands set up with the old token stop working">New token</button>
+        <span class="grow"></span>${s.auth.local ? '' : '<button type="button" class="btn small" id="sign-out">Sign out</button>'}</div>
+    </section>` : ''}
   </div>`;
 
   const renderRoots = () => {
@@ -1117,6 +1137,28 @@ async function viewSettings(seq) {
     }
   };
   bindKey();
+
+  if (s.auth.required) {
+    $('#pw-form').onsubmit = async (e) => {
+      e.preventDefault();
+      if ($('#pw-new').value !== $('#pw-again').value) { toast("The passwords don't match"); return; }
+      try {
+        await api('/api/auth/password', { method: 'POST', body: JSON.stringify({ current: $('#pw-current')?.value || '', password: $('#pw-new').value }) });
+        toast('Password saved. Other browsers need to sign in again.');
+        route();
+      } catch (err) { toast(err.message); }
+    };
+    $('#copy-cmd').onclick = () => copyText(s.mcp_remote_command);
+    $('#new-token').onclick = async () => {
+      if (!confirm('Make a new token? Claude set up with the old one stops working until you run the new command.')) return;
+      await api('/api/auth/token', { method: 'POST' });
+      route();
+    };
+    if ($('#sign-out')) $('#sign-out').onclick = async () => {
+      await api('/api/auth/logout', { method: 'POST' });
+      location.href = '/login.html';
+    };
+  }
 
   const quit = $('#quit');
   if (quit) {

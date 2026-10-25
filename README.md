@@ -42,7 +42,7 @@ To let Claude Code use your library (search, previews, licenses, copying assets 
 claude mcp add packrat --scope user -- packrat mcp
 ```
 
-Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. It has no login, so don't expose it to your network unless you trust everyone on it.
+Packrat only listens on your own computer (`127.0.0.1`) and ignores requests from other websites. To use it from other computers (for example, running on a NAS), set `host = "0.0.0.0"` under `[server]` in `config.toml`. Other computers then sign in with a password: the first visit asks for a one-time setup code printed in Packrat's log, or run `packrat set-password`.
 
 ## Tests
 

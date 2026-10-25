@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Packrat</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='6' height='6' fill='%235b8def'/%3E%3Crect x='9' y='1' width='6' height='6' fill='%23e8a33d'/%3E%3Crect x='1' y='9' width='6' height='6' fill='%2340b07a'/%3E%3Crect x='9' y='9' width='6' height='6' fill='%23d9576b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="signin">
+    <div class="brand"><span class="logo"></span>Packrat</div>
+    <form id="form" class="panel">
+      <h2 id="title">Sign in</h2>
+      <p id="lead" class="dim"></p>
+      <label for="code" data-setup hidden>Setup code</label>
+      <input id="code" data-setup hidden autocomplete="one-time-code" inputmode="numeric" placeholder="1234-5678">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <label for="again" data-setup hidden>Password again</label>
+      <input id="again" data-setup hidden type="password" autocomplete="new-password">
+      <div class="save"><button class="btn primary" id="go">Sign in</button><span id="msg" class="warn"></span></div>
+    </form>
+  </main>
+  <script>
+    'use strict';
+    const $ = (s) => document.querySelector(s);
+    const post = async (path, body) => {
+      const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    };
+    fetch('/api/auth/status').then((r) => r.json()).then((s) => {
+      if (s.signed_in) { location.replace('/'); return; }
+      const setup = !s.password_set;
+      document.querySelectorAll('[data-setup]').forEach((el) => { el.hidden = !setup; });
+      $('#title').textContent = setup ? 'Choose a password' : 'Sign in';
+      $('#lead').textContent = setup
+        ? `Packrat is open to your network, so it needs a password (at least ${s.min_length} characters). The setup code is in Packrat's log.`
+        : 'Packrat is open to your network. Sign in to use it.';
+      $('#password').autocomplete = setup ? 'new-password' : 'current-password';
+      $('#go').textContent = setup ? 'Set password' : 'Sign in';
+      (setup ? $('#code') : $('#password')).focus();
+      $('#form').onsubmit = async (e) => {
+        e.preventDefault();
+        $('#msg').textContent = '';
+        try {
+          if (setup) {
+            if ($('#password').value !== $('#again').value) throw new Error("The passwords don't match.");
+            await post('/api/auth/setup', { code: $('#code').value, password: $('#password').value });
+          } else {
+            await post('/api/auth/login', { password: $('#password').value });
+          }
+          location.replace('/');
+        } catch (err) {
+          $('#msg').textContent = err.message;
+        }
+      };
+    });
+  </script>
+</body>
+</html>

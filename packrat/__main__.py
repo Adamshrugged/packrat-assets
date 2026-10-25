@@ -20,6 +20,8 @@ def main() -> None:
     th.add_argument("--all", action="store_true", help="every image, not just pack covers")
     mc = sub.add_parser("mcp", help="run the MCP server for AI agents (Packrat must be running)")
     mc.add_argument("--url", help="Packrat's address (default: http://localhost:<port from config>)")
+    mc.add_argument("--token", help="API token, for a Packrat on another computer (shown in its Settings)")
+    sub.add_parser("set-password", help="set the password for signing in from other computers (network mode)")
     args = ap.parse_args()
 
     if args.cmd == "mcp":
@@ -27,6 +29,8 @@ def main() -> None:
         import os
         os.environ["PACKRAT_URL"] = (args.url or os.environ.get("PACKRAT_URL")
                                      or f"http://localhost:{config.load(args.config).port}")
+        if args.token:
+            os.environ["PACKRAT_TOKEN"] = args.token
         from .mcp_server import main as mcp_main
         mcp_main()
         return
@@ -38,6 +42,18 @@ def main() -> None:
     if args.cmd is None:
         from .launcher import run
         run(cfg, open_browser=not args.background)
+
+    elif args.cmd == "set-password":
+        import getpass
+        from .auth import Auth
+        password = getpass.getpass("New password: ")
+        if password != getpass.getpass("Again: "):
+            raise SystemExit("The passwords don't match.")
+        try:
+            Auth(required=False).set_password(password)
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
+        print("Password set. Other browsers will need to sign in again.")
 
     elif args.cmd == "scan":
         from .scanner import scan
@@ -64,8 +80,7 @@ def main() -> None:
         from .guard import is_loopback
         print(f"Packrat on http://localhost:{cfg.port}")
         if not is_loopback(cfg.host):
-            print(f"WARNING: listening on {cfg.host}, so anyone on your network can use Packrat. "
-                  "It has no login yet.")
+            print(f"Listening on {cfg.host}: other computers on your network sign in with a password.")
         uvicorn.run(create_app(cfg), host=cfg.host, port=cfg.port, log_level="warning")
 
     elif args.cmd == "thumbs":

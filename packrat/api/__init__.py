@@ -6,6 +6,7 @@ from contextlib import closing
 from fastapi import HTTPException, Request
 
 from .. import db
+from ..auth import Auth
 from ..guard import is_loopback
 from ..jobs import Downloads, Jobs
 
@@ -16,6 +17,7 @@ class Context:
     def __init__(self, cfg, quit=None):
         self.cfg = cfg
         self.quit = quit  # stops the desktop app; None when run as a server
+        self.auth = Auth(required=not is_loopback(cfg.host))
         self.jobs = Jobs()
         self.downloads = Downloads(cfg, self.jobs)
 

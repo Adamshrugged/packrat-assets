@@ -9,7 +9,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import db, secrets
-from .api import Context, library, settings, store
+from .api import Context, auth, library, settings, store
+from .auth import AuthGuard
 from .guard import HostGuard
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -20,10 +21,13 @@ def create_app(cfg, quit=None) -> FastAPI:
     db.init(cfg)
     ctx = Context(cfg, quit)
     app = FastAPI(title="Packrat")
-    for module in (library, store, settings):
+    app.state.ctx = ctx
+    for module in (library, store, settings, auth):
         app.include_router(module.router(ctx))
     app.mount("/", WebFiles(directory=WEB_DIR, html=True), name="web")
+    # Outermost first: right host and origin, then signed in (network mode), then compression.
     app.add_middleware(TextGZip)
+    app.add_middleware(AuthGuard, auth=ctx.auth)
     app.add_middleware(HostGuard, bind_host=cfg.host, allowed_hosts=cfg.allowed_hosts)
 
     threading.Thread(target=schedule_syncs, args=(ctx,), daemon=True).start()

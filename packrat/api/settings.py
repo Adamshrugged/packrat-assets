@@ -55,6 +55,12 @@ def router(ctx: Context) -> APIRouter:
             # Desktop-app options, for a browser on the same computer only
             "start_at_login": autostart.enabled() if is_local(request) and autostart.supported() else None,
             "can_quit": ctx.quit is not None and is_local(request),
+            "auth": {"required": ctx.auth.required, "password_set": ctx.auth.password_set(),
+                     "local": is_local(request)},
+            # For Claude on other computers (needs Packrat installed there too)
+            "mcp_remote_command": (f"claude mcp add packrat --scope user -- packrat mcp --url "
+                                   f"{str(request.base_url).rstrip('/')} --token {ctx.auth.api_token()}"
+                                   if ctx.auth.required else None),
         }
 
     @r.get("/settings")
