@@ -65,8 +65,6 @@ docker compose logs packrat     # the setup code for choosing a password
 
 Open `http://<server>:8765`, enter the code, choose a password, and add `/library` in Settings. Your library is mounted read-only.
 
-Until the first release the image isn't published, so build it first in a copy of this repository: `docker build -t ghcr.io/adamshrugged/packrat-assets:latest .`
-
 ## Development
 
 ```
