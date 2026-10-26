@@ -2,11 +2,12 @@ import argparse
 import logging
 import sys
 
-from . import config, db
+from . import __version__, config, db
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="packrat", description="Packrat: a library for your game assets")
+    ap.add_argument("--version", action="version", version=f"Packrat {__version__}")
     ap.add_argument("--config", help="path to config.toml")
     ap.add_argument("--background", action="store_true", help="start without opening the browser (start at login)")
     sub = ap.add_subparsers(dest="cmd", metavar="command",

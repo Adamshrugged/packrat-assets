@@ -1,0 +1,11 @@
+name: Suggest an idea
+description: Something Packrat could do, or do better.
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: What would you like Packrat to do, and what would it help you with?
+    validations:
+      required: true

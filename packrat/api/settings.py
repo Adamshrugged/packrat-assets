@@ -6,7 +6,10 @@ import threading
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from .. import autostart, config, db, itch, program, secrets, settings
+import platform
+from urllib.parse import urlencode
+
+from .. import ISSUES_URL, __version__, autostart, config, db, itch, program, secrets, settings
 from ..archives import tools as archive_tools
 from ..guard import is_loopback
 from . import Context, is_local
@@ -49,6 +52,11 @@ def router(ctx: Context) -> APIRouter:
             "itch": {"download_dir": cfg.itch_download_dir, "sync_every_hours": cfg.itch_sync_hours,
                      "auto_download": cfg.itch_auto_download, "has_key": bool(secrets.itch_key()),
                      "user": db.get_kv(c, "itch_user")},
+            "version": __version__,
+            "log_path": log if os.path.exists(log := os.path.join(cfg.data_dir, "packrat.log")) else None,
+            # Opens GitHub's issue form with the version and system filled in; nothing is sent automatically.
+            "report_url": f"{ISSUES_URL}/new?" + urlencode({"template": "bug.yml", "version": __version__,
+                                                             "os": f"{platform.system()} {platform.release()}"}),
             "config_path": cfg.source, "data_dir": cfg.data_dir, "archive_tools": list(archive_tools(cfg.sevenzip)),
             "on_network": not is_loopback(cfg.host),
             "can_reveal": is_local(request),

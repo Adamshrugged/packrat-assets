@@ -4,7 +4,7 @@
 import os
 import sys
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 windows = sys.platform == "win32"
 here = os.path.abspath(SPECPATH)
@@ -16,7 +16,7 @@ if windows:
 
 a = Analysis(
     [os.path.join(here, "packrat_main.py")],
-    datas=collect_data_files("packrat"),  # the web UI
+    datas=collect_data_files("packrat") + copy_metadata("packrat-assets"),  # the web UI; the version number
     hiddenimports=hidden,
     excludes=["tkinter", "pytest"],
 )

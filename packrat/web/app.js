@@ -1068,10 +1068,12 @@ async function viewSettings(seq) {
     </form>
 
     <section class="panel about">
-      <h3>Files</h3>
+      <h3>About</h3>
       <dl class="kv">
+        <dt>Version</dt><dd>Packrat ${esc(s.version)} · ${extLink(s.report_url, 'Report a problem')} ${info('Opens a form on GitHub (a free account is needed). It becomes a public issue.')}</dd>
         <dt>Settings file</dt><dd><code>${esc(s.config_path)}</code></dd>
         <dt>Database</dt><dd><code>${esc(s.data_dir)}</code></dd>
+        ${s.log_path ? `<dt>Log</dt><dd><code>${esc(s.log_path)}</code></dd>` : ''}
         <dt>Archive tools</dt><dd>${s.archive_tools.length ? esc(s.archive_tools.join(', ')) : `None found ${info('Install 7-Zip to read .rar and .7z packs.')}`}</dd>
       </dl>
     </section>

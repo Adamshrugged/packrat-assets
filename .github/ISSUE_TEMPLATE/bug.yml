@@ -1,0 +1,37 @@
+name: Report a problem
+description: Something in Packrat doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! This becomes a **public** issue, so leave out personal details:
+        your name, email, API keys, and usernames in file paths (replace them with `<user>`).
+  - type: input
+    id: version
+    attributes:
+      label: Packrat version
+      description: Shown in Packrat under Settings → About.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11, Fedora 44 (KDE), Docker on a Synology NAS…"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: The last lines of the log file named under Settings → About. Remove anything personal first.
+      render: text
