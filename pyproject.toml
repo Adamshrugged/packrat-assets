@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "packrat-assets"
-version = "0.1.1"
+version = "0.2.0"
 description = "Desktop library for your purchased game assets, with itch.io sync and an MCP server."
 readme = "README.md"
 license = "MIT"

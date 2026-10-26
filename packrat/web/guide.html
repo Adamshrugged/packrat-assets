@@ -5,6 +5,7 @@
     <a href="#g-use">Everyday use</a>
     <a href="#g-free">Free assets</a>
     <a href="#g-itch">itch.io purchases</a>
+    <a href="#g-humble">Humble Bundle</a>
     <a href="#g-run">Running Packrat</a>
     <a href="#g-claude-connect">Connect Claude</a>
     <a href="#g-claude-use">Using it from Claude</a>
@@ -14,7 +15,7 @@
 
 <article class="guide">
 <h1>Guide</h1>
-<p class="lead">Browse your asset library, keep itch.io purchases downloaded, and use it all from Claude.</p>
+<p class="lead">Browse your asset library, keep your itch.io and Humble purchases downloaded, and use it all from Claude.</p>
 
 <h2 id="g-start">Getting started</h2>
 <ul>
@@ -38,16 +39,25 @@
   <li>Search, open the <b>itch.io</b> tab, then press <b>Add &amp; download</b>. When it's done, <b>Open pack</b> takes you to it.</li>
   <li>Or paste an itch.io page link into the search box.</li>
   <li><b>Free only</b> and <b>Refine</b> narrow the results. itch.io search stops at about 50 results; <b>More</b> continues with free assets that have your search word as a tag.</li>
-  <li>Paid assets open on itch.io. After you buy one, press <b>Sync itch.io</b>.</li>
+  <li>Paid assets open on itch.io. After you buy one, press <b>Sync</b> on the Purchases page.</li>
 </ul>
 
 <h2 id="g-itch">itch.io purchases</h2>
 <ul>
-  <li>Connect your account in <b>Settings</b> with an itch.io API key. Packrat then syncs your purchases, by default once a day.</li>
+  <li>Connect your account in <b>Settings</b> with an itch.io API key. Packrat then syncs your purchases, by default once a day (<b>Settings → Syncing</b>).</li>
   <li><b>Purchases</b> shows what you own and whether it's already in your library. Files are matched by name and size, so packs you already have aren't downloaded again.</li>
   <li><b>Download</b> (one purchase) or <b>Download all missing</b> saves to your download folder, one folder per purchase. Each file is checked against itch.io's checksum. <b>Cancel</b> at the top stops downloads; finished files are kept.</li>
   <li>Extras (GameMaker packages, installers, HTML demos, license files) are listed but don't count as missing.</li>
   <li><b>Hide</b> takes purchases you don't want off the lists. Type in the filter box to hide many at once.</li>
+</ul>
+
+<h2 id="g-humble">Humble Bundle (experimental)</h2>
+<ul>
+  <li>Humble has no public API, so Packrat signs in with your browser's Humble session cookie. It may stop working when Humble changes its site.</li>
+  <li>To connect: sign in at humblebundle.com, press <kbd>F12</kbd>, open <i>Storage</i> (Firefox) or <i>Application</i> (Chrome) → <i>Cookies</i> → www.humblebundle.com, copy the value of <code>_simpleauth_sess</code>, and paste it in <b>Settings → Humble Bundle</b>.</li>
+  <li>Only game assets are listed: products from asset bundles, ones that look like asset packs, and anything already in your library. Games, books and software are skipped.</li>
+  <li>Humble purchases appear in <b>Purchases</b> next to itch.io ones and download the same way, into their own folder. <b>Sync</b> updates both stores.</li>
+  <li>When a product has separate Windows, Mac and Linux builds, only this computer's build is downloaded.</li>
 </ul>
 
 <h2 id="g-run">Running Packrat</h2>
@@ -81,6 +91,9 @@ Preview before choosing, match the style of ./assets, and record licenses in CRE
 
   <dt>itch.io sync fails or says to reconnect</dt>
   <dd>The API key was revoked or mistyped. Create a new one on itch.io (<i>Settings → API keys</i>) and paste it in Packrat's <b>Settings</b>.</dd>
+
+  <dt>Humble sync says the cookie expired</dt>
+  <dd>Humble ends the session when you sign out or after a while. Copy a fresh <code>_simpleauth_sess</code> as described in <a href="#g-humble">Humble Bundle</a> and paste it in <b>Settings → Humble Bundle</b>, then press <b>Replace</b>.</dd>
 
   <dt>.rar or .7z packs show no files</dt>
   <dd>Packrat reads them with 7-Zip, unrar or bsdtar. Windows includes bsdtar, which reads most of them; for the rest, install 7-Zip from 7-zip.org. On Linux install <code>7zip</code> and <code>bsdtar</code> (Fedora's 7-Zip can't read .rar). Then press <b>Rescan</b>.</dd>

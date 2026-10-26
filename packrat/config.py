@@ -26,6 +26,8 @@ class Config:
     port: int
     sevenzip: str | None
     itch_download_dir: str | None = None
+    humble_download_dir: str | None = None
+    # Sync schedule and auto-download apply to every connected store (kept under [itch] in config.toml)
     itch_sync_hours: float = 24
     itch_auto_download: bool = False
     allowed_hosts: list[str] = field(default_factory=list)
@@ -39,13 +41,20 @@ class Config:
     def thumb_dir(self) -> str:
         return os.path.join(self.data_dir, "thumbs")
 
-    def ensure_download_dir(self) -> None:
-        """Make the default download folder on first use. A chosen folder must already exist: it may be on
-        a drive that isn't connected, and creating it locally would hide that."""
-        if self.itch_download_dir == default_download_dir():
-            os.makedirs(self.itch_download_dir, exist_ok=True)
-        elif not os.path.isdir(self.itch_download_dir):
-            raise FileNotFoundError(f"download folder not reachable: {self.itch_download_dir}")
+    @property
+    def download_dirs(self) -> dict[str, str]:
+        """Each store's download folder."""
+        return {"itch": self.itch_download_dir, "humble": self.humble_download_dir}
+
+    def ensure_download_dir(self, store: str = "itch") -> str:
+        """A store's download folder, made on first use if it's the default. A chosen folder must already
+        exist: it may be on a drive that isn't connected, and creating it locally would hide that."""
+        folder = self.download_dirs[store]
+        if folder == DEFAULT_DOWNLOADS[store]():
+            os.makedirs(folder, exist_ok=True)
+        elif not os.path.isdir(folder):
+            raise FileNotFoundError(f"download folder not reachable: {folder}")
+        return folder
 
     def display_path(self, path: str, member: str | None = None) -> str:
         """Translate a server-side path into the path the user sees (e.g. a mapped network drive)."""
@@ -98,6 +107,15 @@ def default_download_dir() -> str:
     return os.environ.get("PACKRAT_DOWNLOADS") or os.path.join(os.path.expanduser("~"), "Packrat", "itch.io")
 
 
+def default_humble_download_dir() -> str:
+    return (os.environ.get("PACKRAT_HUMBLE_DOWNLOADS")
+            or os.path.join(os.path.expanduser("~"), "Packrat", "Humble Bundle"))
+
+
+DEFAULT_DOWNLOADS = {"itch": default_download_dir, "humble": default_humble_download_dir}
+LABELS = {"itch": "itch.io downloads", "humble": "Humble downloads"}
+
+
 def default_path() -> str:
     return os.environ.get("PACKRAT_CONFIG", os.path.join(config_dir(), "config.toml"))
 
@@ -128,12 +146,13 @@ def load(path: str | None = None) -> Config:
             ignore=list(r.get("ignore", [])),
         ))
 
-    itch = raw.get("itch", {})
-    download_dir = os.path.normpath(os.path.expanduser(itch.get("download_dir") or default_download_dir()))
-    if not any(inside(download_dir, r.path) for r in roots):
-        # Downloads must be indexed, so the download folder is always part of the library.
-        roots.append(Root(label="itch.io downloads", path=download_dir, display=download_dir, containers=[],
-                          auto=True))
+    itch, humble = raw.get("itch", {}), raw.get("humble", {})
+    downloads = {store: os.path.normpath(os.path.expanduser(section.get("download_dir") or DEFAULT_DOWNLOADS[store]()))
+                 for store, section in (("itch", itch), ("humble", humble))}
+    for store, folder in downloads.items():
+        if not any(inside(folder, r.path) for r in roots):
+            # Downloads must be indexed, so each download folder is always part of the library.
+            roots.append(Root(label=LABELS[store], path=folder, display=folder, containers=[], auto=True))
     # Packs are grouped by label, so two folders with the same name (e.g. two "assets") need distinct ones.
     seen: set[str] = set()
     for r in roots:
@@ -148,7 +167,8 @@ def load(path: str | None = None) -> Config:
         host=os.environ.get("PACKRAT_HOST") or srv.get("host", "127.0.0.1"),
         port=int(os.environ.get("PACKRAT_PORT") or srv.get("port", 8765)),
         sevenzip=paths.get("sevenzip") or find_7z(),
-        itch_download_dir=download_dir,
+        itch_download_dir=downloads["itch"],
+        humble_download_dir=downloads["humble"],
         itch_sync_hours=float(itch.get("sync_every_hours", 24)),
         itch_auto_download=bool(itch.get("auto_download", False)),
         allowed_hosts=[h.lower() for h in srv.get("allowed_hosts", [])],

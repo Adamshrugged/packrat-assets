@@ -418,7 +418,7 @@ async function viewPack(seq, id, params) {
 
 function storePanel(it) {
   return `<div class="panel store-panel">
-    <h3>From ${it.store === 'itch' ? 'itch.io' : esc(it.store)}</h3>
+    <h3>From ${esc(STORE_NAME[it.store] || it.store)}</h3>
     ${it.cover_url ? extLink(it.url, `<img class="cover" src="${esc(it.cover_url)}" alt="" loading="lazy">`) : ''}
     <div class="t">${extLink(it.url, esc(it.title))}</div>
     <div class="dim" style="font-size:12.5px">${byAuthor(it.author, it.author_url)}${it.purchased_at ? ` · bought ${esc(it.purchased_at.slice(0, 10))}` : ''}</div>
@@ -497,7 +497,7 @@ const STATUS = {
 };
 const MATCH_NOTE = { exact: '', size: ' (same size, renamed)', name: ' (matched by name)', title: ' (matched by title)' };
 
-const STORE_NAME = { itch: 'itch.io' };
+const STORE_NAME = { itch: 'itch.io', humble: 'Humble' };
 /** Something a Download of this item would fetch (the server marks each file, see is_pending). */
 const hasPending = (it) => it.files.some((f) => f.pending);
 
@@ -513,7 +513,7 @@ function purchaseRow(it) {
     return `<div class="pfile"><span class="fn">${esc(f.filename)}</span><span class="dim">${fmtSize(f.size)}</span>${where}</div>`;
   }).join('');
   const bought = it.purchased_at ? it.purchased_at.slice(0, 10) : '';
-  const meta = [byAuthor(it.author, it.author_url), bought && `${it.free ? 'added' : 'bought'} ${bought}`,
+  const meta = [byAuthor(it.author, it.author_url), it.bundle && `in ${esc(it.bundle)}`, bought && `${it.free ? 'added' : 'bought'} ${bought}`,
     it.license && esc(it.license), it.ai && `AI: ${esc(it.ai)}`, it.page_gone && 'page removed from itch.io']
     .filter(Boolean).join(' · ');
   const actions = [];
@@ -549,7 +549,7 @@ async function viewPurchases(seq, params) {
 
   const assetPanel = summary.pending_files ? `<div class="panel" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div style="flex:1;min-width:220px"><b>${plural(summary.pending_items, 'purchase')}</b> with ${plural(summary.pending_files, 'missing file')} (${fmtSize(summary.pending_bytes)}).
-          <div class="dim" style="font-size:12.5px">${summary.download_dir ? `Saves to <code class="mono">${esc(summary.download_dir)}</code>.` : 'Choose a download folder in <a href="#/settings">Settings</a>.'}
+          <div class="dim" style="font-size:12.5px">Saves to ${summary.download_dirs.map((d) => `<code class="mono">${esc(d)}</code>`).join(' and ')}.
           ${summary.sync_every_hours ? `Syncs every ${summary.sync_every_hours} h${summary.auto_download ? ' and downloads new purchases' : ''}.` : ''}
           ${summary.last_sync ? `Last synced ${new Date(summary.last_sync * 1000).toLocaleString()}.` : ''}</div></div>
         <button class="btn primary" id="dl-all">Download all missing</button>
@@ -565,7 +565,7 @@ async function viewPurchases(seq, params) {
           <option value="recent">Recently bought</option><option value="title">Title</option><option value="author">Author</option>
         </select>
         <a class="btn" href="#/search?src=itch" title="Add free assets from itch.io">Add from itch.io</a>
-        <button class="btn" id="sync">Sync itch.io</button>
+        <button class="btn" id="sync" title="Import new purchases from your connected stores">Sync</button>
       </div>
       <div class="dim" id="bulk-bar" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:-4px 0 10px;font-size:12.5px" hidden>
         <span id="shown-count"></span>
@@ -573,9 +573,9 @@ async function viewPurchases(seq, params) {
         <button class="btn small primary" id="get-shown">Download all shown</button>
       </div>
       ${assetPanel}
-      ${summary.sync_errors.length ? `<details class="panel sync-errors"><summary class="warn">${plural(summary.sync_errors.length, 'purchase')} couldn't be refreshed in the last sync</summary>
+      ${summary.sync_errors.length ? `<details class="panel sync-errors"><summary class="warn">The last sync had ${plural(summary.sync_errors.length, 'problem')}</summary>
         <ul>${summary.sync_errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
-        <p class="dim">Usually temporary: press <b>Sync itch.io</b> to retry.</p></details>` : ''}
+        <p class="dim">Most clear up on the next <b>Sync</b>. An expired Humble cookie needs replacing in <a href="#/settings">Settings</a>.</p></details>` : ''}
       ${summary.total ? `<nav class="tabs">${tabs.map(([v, l]) => `<a href="${here({ status: v })}" class="${status === v ? 'on' : ''}">${l} <span class="n">${count(v)}</span></a>`).join('')}</nav>` : ''}
       <div class="plist" id="plist"></div>
     </section></div>`;
@@ -589,8 +589,8 @@ async function viewPurchases(seq, params) {
     if (sort === 'author') list = [...list].sort((a, b) => a.author.localeCompare(b.author) || a.title.localeCompare(b.title));
     shown = list;
     const empty = summary.total ? 'Nothing here.'
-      : summary.has_itch ? 'No purchases yet. Press <b>Sync itch.io</b>.'
-        : 'Connect itch.io in <a href="#/settings">Settings</a> to see your purchases.';
+      : summary.has_itch || summary.has_humble ? 'No purchases yet. Press <b>Sync</b>.'
+        : 'Connect itch.io or Humble in <a href="#/settings">Settings</a> to see your purchases.';
     $('#plist').innerHTML = list.length ? list.map(purchaseRow).join('') : `<div class="empty">${empty}</div>`;
     // Bulk actions appear once the list is filtered.
     $('#bulk-bar').hidden = !(f && list.length);
@@ -623,7 +623,7 @@ async function viewPurchases(seq, params) {
   const dlAll = $('#dl-all');
   if (dlAll) {
     dlAll.onclick = () => {
-      if (confirm(`Download ${plural(summary.pending_files, 'file')} (${fmtSize(summary.pending_bytes)}) to ${summary.download_dir}?`)) {
+      if (confirm(`Download ${plural(summary.pending_files, 'file')} (${fmtSize(summary.pending_bytes)}) to ${summary.download_dirs.join(' and ')}?`)) {
         startDownload({ all_missing: true }, dlAll);
       }
     };
@@ -1053,6 +1053,22 @@ async function viewSettings(seq) {
         <label for="dl">Download folder ${info('One subfolder per purchase. Always in your library.')}</label>
         <div class="inline"><input id="dl" value="${esc(it.download_dir)}" spellcheck="false">
           <button type="button" class="btn" id="dl-pick">Browse…</button></div>
+      </section>
+
+      <section class="panel">
+        <h3>Humble Bundle <span class="chip">experimental</span> ${info('Humble has no public API, so this uses the same data as its website and may stop working when Humble changes it. Only game assets are listed.')}</h3>
+        <p class="dim">${s.humble.connected ? 'Connected. When Humble asks you to sign in again, paste a new' : 'Paste your Humble'}
+          ${tip('session cookie', 'Sign in at humblebundle.com, press F12, open Storage (Firefox) or Application (Chrome) → Cookies → www.humblebundle.com, and copy the value of _simpleauth_sess. It stops working when you sign out of Humble.')}.</p>
+        <div class="inline"><input id="humble-cookie" type="password" autocomplete="off" spellcheck="false" placeholder="_simpleauth_sess value">
+          <button type="button" class="btn primary" id="humble-save">${s.humble.connected ? 'Replace' : 'Connect'}</button>
+          ${s.humble.connected ? '<button type="button" class="btn" id="humble-remove">Remove</button>' : ''}</div>
+        <label for="hdl">Download folder ${info('One subfolder per purchase. Always in your library.')}</label>
+        <div class="inline"><input id="hdl" value="${esc(s.humble.download_dir)}" spellcheck="false">
+          <button type="button" class="btn" id="hdl-pick">Browse…</button></div>
+      </section>
+
+      <section class="panel">
+        <h3>Syncing</h3>
         <label for="hours">Sync automatically</label>
         <div class="inline"><select id="hours">
           ${[[0, 'Off'], [1, 'Every hour'], [6, 'Every 6 hours'], [24, 'Once a day']]
@@ -1171,6 +1187,31 @@ async function viewSettings(seq) {
   };
   bindKey();
 
+  $('#hdl-pick').onclick = async () => {
+    const path = await pickFolder($('#hdl').value.trim() || null);
+    if (path) $('#hdl').value = path;
+  };
+  $('#humble-save').onclick = async () => {
+    const btn = $('#humble-save');
+    btn.disabled = true;
+    try {
+      await api('/api/settings/humble-cookie', { method: 'POST', body: JSON.stringify({ cookie: $('#humble-cookie').value }) });
+      toast('Connected to Humble. Syncing purchases…');
+      route();
+      trackActivity();
+    } catch (e) {
+      toast(e.message);
+      btn.disabled = false;
+    }
+  };
+  if ($('#humble-remove')) {
+    $('#humble-remove').onclick = async () => {
+      if (!confirm('Disconnect Humble? Purchases already imported stay listed.')) return;
+      await api('/api/settings/humble-cookie', { method: 'DELETE' });
+      route();
+    };
+  }
+
   if (s.auth.required) {
     $('#pw-form').onsubmit = async (e) => {
       e.preventDefault();
@@ -1213,6 +1254,7 @@ async function viewSettings(seq) {
         body: JSON.stringify({
           roots,
           itch: { download_dir: $('#dl').value.trim() || null, sync_every_hours: +$('#hours').value, auto_download: $('#auto').checked },
+          humble: { download_dir: $('#hdl').value.trim() || null },
           start_at_login: $('#login') ? $('#login').checked : null,
         }),
       });
@@ -1250,10 +1292,10 @@ const FINISHED = {
   scan: (j) => (j.error ? `Scan failed: ${j.error}` : 'Scan finished'),
   itch: (j) => {
     const n = j.result?.errors || 0;
-    return j.error ? `Sync failed: ${j.error}` : n ? `Sync finished; ${plural(n, 'purchase')} couldn't be refreshed` : 'Sync finished';
+    return j.error ? `Sync failed: ${j.error}` : n ? `Sync finished with ${plural(n, 'problem')}` : 'Sync finished';
   },
   download: (j) => {
-    const r = j.result?.itch;
+    const r = j.result;
     return j.error ? `Download failed: ${j.error}` : r?.cancelled ? 'Downloads cancelled'
       : r?.failed ? `${plural(r.failed, 'download')} failed` : 'Downloads finished';
   },
@@ -1267,7 +1309,7 @@ async function trackActivity() {
   const { scan, itch: sync, download: dl } = a;
   const el = $('#activity');
   el.hidden = !scan.running && !sync.running && !dl.running;
-  el.textContent = dl.running ? downloadText(dl) : sync.running ? 'Syncing itch.io…' : scanText(scan);
+  el.textContent = dl.running ? downloadText(dl) : sync.running ? 'Syncing…' : scanText(scan);
   el.href = dl.running || sync.running ? '#/purchases' : '#/';
   $('#activity-cancel').hidden = !dl.running;
   $('#rescan').disabled = scan.running;

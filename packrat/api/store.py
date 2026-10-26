@@ -5,7 +5,7 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .. import db, itch, secrets
+from .. import db, itch, stores
 from . import Context, split_tags
 
 GONE = "no longer available on itch.io"  # itch._refresh_item stores this when a page was removed
@@ -24,13 +24,15 @@ def item_status(files: list[dict]) -> str:
 def load_items(ctx: Context, c: sqlite3.Connection, where: str = "1", args=()) -> list[dict]:
     """Purchases matching an SQL condition, with their files, library matches and download state."""
     items = {}
-    for r in c.execute(f"SELECT * FROM store_items WHERE {where} ORDER BY purchased_at DESC", args):
+    for r in c.execute(f"SELECT * FROM store_items WHERE asset = 1 AND ({where}) ORDER BY purchased_at DESC", args):
         d = {k: r[k] for k in ("id", "store", "store_id", "title", "author", "author_url", "url", "cover_url",
                                "classification", "purchased_at", "license", "terms", "ai")}
         d["tags"] = split_tags(r["tags"])
         d["free"] = not r["key_id"]  # added as a free asset, not bought or claimed
         d["hidden"] = bool(r["hidden"])
-        d["page_gone"] = json.loads(r["info"] or "{}").get("Page") == GONE
+        info = json.loads(r["info"] or "{}")
+        d["page_gone"] = info.get("Page") == GONE
+        d["bundle"] = info.get("Bundle", "")  # Humble: the bundle it came in
         d["files"] = []
         items[r["id"]] = d
     if not items:
@@ -41,8 +43,8 @@ def load_items(ctx: Context, c: sqlite3.Connection, where: str = "1", args=()) -
         items[f["item_id"]]["files"].append({
             "id": f["id"], "filename": f["filename"], "size": f["size"], "match": f["match_kind"],
             "pack_id": f["match_pack_id"], "pack_name": f["pack_name"],
-            "extra": bool(itch.SIDE_FILES.search(f["filename"])),
-            "pending": itch.is_pending(f["match_pack_id"] is not None, f["filename"]),  # what Download would fetch
+            "extra": bool(stores.SIDE_FILES.search(f["filename"])),
+            "pending": stores.is_pending(f["match_pack_id"] is not None, f["filename"]),  # what Download would fetch
         })
     for d in items.values():
         d["status"] = item_status(d["files"])
@@ -98,14 +100,17 @@ def router(ctx: Context) -> APIRouter:
         for i in load_items(ctx, c):
             key = "hidden" if i["hidden"] else i["status"]
             counts[key] = counts.get(key, 0) + 1
-        pending = itch.pending_files(c)
+        pending = stores.pending_files(c)
+        connected = stores.connected()
         return {
-            "total": sum(counts.values()), "counts": counts, "has_itch": bool(secrets.itch_key()),
+            "total": sum(counts.values()), "counts": counts,
+            "has_itch": connected["itch"], "has_humble": connected["humble"],
             "pending_files": len(pending), "pending_bytes": sum(f["size"] or 0 for f in pending),
             "pending_items": len({f["item_id"] for f in pending}),
-            "download_dir": cfg.display_path(cfg.itch_download_dir),
-            "last_sync": float(db.get_kv(c, "itch_last_sync", 0) or 0),
-            "sync_errors": json.loads(db.get_kv(c, "itch_last_errors", "[]") or "[]"),
+            # where the pending files would go
+            "download_dirs": [cfg.display_path(cfg.download_dirs[s]) for s in sorted({f["store"] for f in pending})],
+            "last_sync": max(float(db.get_kv(c, f"{s}_last_sync", 0) or 0) for s in stores.NAMES),
+            "sync_errors": sum((json.loads(db.get_kv(c, f"{s}_last_errors", "[]") or "[]") for s in stores.NAMES), []),
             "auto_download": cfg.itch_auto_download, "sync_every_hours": cfg.itch_sync_hours,
         }
 
@@ -122,7 +127,7 @@ def router(ctx: Context) -> APIRouter:
             ids = [f["id"] for f in c.execute(f"SELECT id FROM store_files WHERE match_pack_id IS NULL AND id IN "
                                               f"({db.placeholders(req.file_ids)})", req.file_ids)]
         elif req.item_ids or req.all_missing:
-            ids = [f["id"] for f in itch.pending_files(c, None if req.all_missing else req.item_ids)]
+            ids = [f["id"] for f in stores.pending_files(c, None if req.all_missing else req.item_ids)]
         else:
             raise HTTPException(400, "nothing selected")
         if not ids:

@@ -6,7 +6,7 @@ import tomllib
 import pytest
 
 from packrat import config, settings
-from packrat.itch import safe_name
+from packrat.stores import safe_name
 from conftest import toml_str
 
 
@@ -29,15 +29,17 @@ def test_save_and_reload(tmp_path):
     assert again.itch_download_dir == config.default_download_dir()  # the default isn't written out
 
 
-def test_download_folder_is_always_indexed(tmp_path):
-    (tmp_path / "config.toml").write_text(f'[itch]\ndownload_dir = {toml_str(tmp_path / "dl")}\n')
+def test_download_folders_are_always_indexed(tmp_path):
+    (tmp_path / "config.toml").write_text(f'[itch]\ndownload_dir = {toml_str(tmp_path / "dl")}\n'
+                                          f'[humble]\ndownload_dir = {toml_str(tmp_path / "hb")}\n')
     cfg = config.load(str(tmp_path / "config.toml"))
-    assert [(r.path, r.auto) for r in cfg.roots] == [(str(tmp_path / "dl"), True)]
+    assert [(r.path, r.auto) for r in cfg.roots] == [(str(tmp_path / "dl"), True), (str(tmp_path / "hb"), True)]
 
 
 def test_download_folder_inside_a_root_is_not_added_twice(tmp_path):
     (tmp_path / "config.toml").write_text(
-        f'[itch]\ndownload_dir = {toml_str(tmp_path / "lib" / "itch")}\n[[roots]]\npath = {toml_str(tmp_path / "lib")}\n')
+        f'[itch]\ndownload_dir = {toml_str(tmp_path / "lib" / "itch")}\n[humble]\ndownload_dir = '
+        f'{toml_str(tmp_path / "lib" / "humble")}\n[[roots]]\npath = {toml_str(tmp_path / "lib")}\n')
     assert len(config.load(str(tmp_path / "config.toml")).roots) == 1
 
 

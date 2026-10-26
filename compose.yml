@@ -1,6 +1,6 @@
 # Packrat on a NAS or home server: always on, used from any computer on your network.
 #
-#   1. Change the paths under "volumes" to your asset library and a download folder.
+#   1. Change the paths under "volumes" to your asset library and download folders.
 #   2. docker compose up -d
 #   3. docker compose logs packrat      (copy the setup code)
 #   4. Open http://<this machine>:8765 in a browser, enter the code and choose a password.
@@ -15,13 +15,15 @@ services:
     # Run as the user that owns your library files (find them with: id -u; id -g).
     user: "1000:1000"
     environment:
-      PACKRAT_DOWNLOADS: /library/itch.io   # the writable folder above
+      PACKRAT_DOWNLOADS: /library/itch.io                # the writable folders below
+      PACKRAT_HUMBLE_DOWNLOADS: "/library/Humble Bundle"
     volumes:
       # Your asset library. Read-only: Packrat never changes it.
       - /path/to/your/assets:/library:ro
-      # Where itch.io purchases download to: one folder inside the library, mounted again with write access.
+      # Where purchases download to: one folder per store inside the library, mounted again with write access.
       - /path/to/your/assets/itch.io:/library/itch.io
-      - packrat-config:/config   # settings, password, itch.io key
+      - "/path/to/your/assets/Humble Bundle:/library/Humble Bundle"
+      - packrat-config:/config   # settings, password, store keys
       - packrat-data:/data       # database and previews
 
 volumes:

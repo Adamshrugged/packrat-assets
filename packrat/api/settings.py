@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import platform
 from urllib.parse import urlencode
 
-from .. import ISSUES_URL, __version__, autostart, config, db, itch, program, secrets, settings
+from .. import ISSUES_URL, __version__, autostart, config, db, humble, itch, program, secrets, settings, stores
 from ..archives import tools as archive_tools
 from ..guard import is_loopback
 from . import Context, is_local
@@ -29,10 +29,19 @@ class ItchIn(BaseModel):
     auto_download: bool = False
 
 
+class HumbleIn(BaseModel):
+    download_dir: str | None = None
+
+
 class SettingsIn(BaseModel):
     roots: list[RootIn]
     itch: ItchIn
+    humble: HumbleIn = HumbleIn()
     start_at_login: bool | None = None
+
+
+class CookieIn(BaseModel):
+    cookie: str
 
 
 class KeyIn(BaseModel):
@@ -52,6 +61,7 @@ def router(ctx: Context) -> APIRouter:
             "itch": {"download_dir": cfg.itch_download_dir, "sync_every_hours": cfg.itch_sync_hours,
                      "auto_download": cfg.itch_auto_download, "has_key": bool(secrets.itch_key()),
                      "user": db.get_kv(c, "itch_user")},
+            "humble": {"download_dir": cfg.humble_download_dir, "connected": stores.connected()["humble"]},
             "version": __version__,
             "log_path": log if os.path.exists(log := os.path.join(cfg.data_dir, "packrat.log")) else None,
             # Opens GitHub's issue form with the version and system filled in; nothing is sent automatically.
@@ -85,6 +95,15 @@ def router(ctx: Context) -> APIRouter:
             out.add(os.path.relpath(full, root).replace(os.sep, "/"))
         return sorted(out)
 
+    def download_folder(chosen: str | None, default: str) -> str:
+        folder = os.path.normpath(os.path.expanduser((chosen or "").strip() or default))
+        try:
+            if folder != default:  # the default is made on first download
+                os.makedirs(folder, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(400, f"can't create the download folder: {e.strerror}") from None
+        return folder
+
     @r.put("/settings")
     def put_settings(req: SettingsIn, request: Request, c: sqlite3.Connection = conn):
         roots, seen = [], set()
@@ -97,19 +116,14 @@ def router(ctx: Context) -> APIRouter:
             seen.add(os.path.normcase(path))
             roots.append({**x.model_dump(), "path": path,
                           "containers": inner_folders(path, x.containers), "ignore": inner_folders(path, x.ignore)})
-        download_dir = os.path.normpath(os.path.expanduser((req.itch.download_dir or "").strip()
-                                                           or config.default_download_dir()))
-        try:
-            if download_dir != config.default_download_dir():  # the default is made on first download
-                os.makedirs(download_dir, exist_ok=True)
-        except OSError as e:
-            raise HTTPException(400, f"can't create the download folder: {e.strerror}") from None
+        download_dir = download_folder(req.itch.download_dir, config.default_download_dir())
+        humble_dir = download_folder(req.humble.download_dir, config.default_humble_download_dir())
         if req.itch.sync_every_hours < 0:
             raise HTTPException(400, "sync interval can't be negative")
         if req.start_at_login is not None and is_local(request) and autostart.supported():
             autostart.set_enabled(req.start_at_login)
         old_roots = [(x.path, x.containers, x.ignore) for x in cfg.roots]
-        settings.save(cfg, roots, {**req.itch.model_dump(), "download_dir": download_dir})
+        settings.save(cfg, roots, {**req.itch.model_dump(), "download_dir": download_dir}, {"download_dir": humble_dir})
         rescan = [(x.path, x.containers, x.ignore) for x in cfg.roots] != old_roots
         if rescan:
             ctx.start_scan("scanning library folders…")
@@ -146,6 +160,27 @@ def router(ctx: Context) -> APIRouter:
             raise HTTPException(403, "only the desktop app on this computer can be quit from here")
         threading.Timer(0.3, ctx.quit).start()
         return {"ok": True}
+
+    @r.post("/settings/humble-cookie")
+    def set_humble_cookie(req: CookieIn, request: Request, c: sqlite3.Connection = conn):
+        """Check the cookie with Humble, store it, and start a sync. The cookie is never sent back."""
+        cookie = req.cookie.strip().removeprefix("_simpleauth_sess=").strip('"')
+        if not cookie:
+            raise HTTPException(400, "paste the cookie first")
+        try:
+            humble.Client(cookie, {"humble_session_cookie": cookie}).order_keys()
+        except humble.HumbleError:
+            raise HTTPException(400, "Humble didn't accept this cookie. Sign in at humblebundle.com and copy it again.") from None
+        settings.save_secrets({**secrets.load(), "humble_session_cookie": cookie})
+        ctx.start_sync()
+        return settings_out(c, request)
+
+    @r.delete("/settings/humble-cookie")
+    def delete_humble_cookie(request: Request, c: sqlite3.Connection = conn):
+        values = secrets.load()
+        values.pop("humble_session_cookie", None)
+        settings.save_secrets(values)
+        return settings_out(c, request)
 
     @r.get("/browse")
     def browse(path: str = ""):

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS store_items(
   ai TEXT DEFAULT '',                -- AI disclosure
   info TEXT DEFAULT '{}',            -- other "More information" rows (json)
   hidden INTEGER DEFAULT 0,
+  asset INTEGER DEFAULT 1,           -- 0: a Humble product that isn't a game asset (a book, game...); not listed
   first_seen REAL,                   -- when a sync first saw it; NULL for the first import (backlog)
   uploads_fetched_at REAL,
   meta_fetched_at REAL,
@@ -106,7 +107,9 @@ def connect(cfg) -> sqlite3.Connection:
 
 
 # Columns added after a release: (table, column, ALTER TABLE statement). New installs get them from SCHEMA.
-MIGRATIONS: list[tuple[str, str, str]] = []
+MIGRATIONS: list[tuple[str, str, str]] = [
+    ("store_items", "asset", "ALTER TABLE store_items ADD COLUMN asset INTEGER DEFAULT 1"),  # 0.2: Humble
+]
 
 
 def init(cfg) -> None:

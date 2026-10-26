@@ -62,7 +62,7 @@ class Downloads:
         self._generation = 0  # Cancel bumps this; batches started before it stop
 
     def start(self, file_ids: list[int]) -> dict:
-        from .itch import DownloadCancelled, download_many
+        from .stores import DownloadCancelled, download_many
         with closing(db.connect(self.cfg)) as c:
             item_ids = [r[0] for r in c.execute(
                 f"SELECT DISTINCT item_id FROM store_files WHERE id IN ({db.placeholders(file_ids)})", file_ids)]
@@ -78,8 +78,8 @@ class Downloads:
             self.items.update(dict.fromkeys(item_ids, "running"))
             try:
                 if self._generation != generation:  # cancelled while queued
-                    return {"itch": {"downloaded": 0, "failed": 0, "errors": [], "cancelled": True}}
-                return {"itch": download_many(self.cfg, file_ids, checked)}
+                    return {"downloaded": 0, "failed": 0, "errors": [], "cancelled": True}
+                return download_many(self.cfg, file_ids, checked)
             finally:
                 for i in item_ids:
                     self.items.pop(i, None)

@@ -34,12 +34,12 @@ class Context:
         return self.jobs.start("scan", lambda p: scan(self.cfg, p), message)
 
     def start_sync(self, message: str = "fetching purchases…") -> dict:
-        """Sync itch.io purchases (and auto-download new ones if enabled). Records the attempt, so the
-        scheduler waits a full interval even after a failed sync instead of retrying every minute."""
-        from ..itch import sync_and_auto_download
+        """Sync every connected store (and auto-download new purchases if enabled). Records the attempt, so
+        the scheduler waits a full interval even after a failed sync instead of retrying every minute."""
+        from ..stores import sync_all
         with closing(db.connect(self.cfg)) as c:
             db.set_kv(c, "itch_last_attempt", time.time())
-        return self.jobs.start("itch", lambda p: sync_and_auto_download(self.cfg, p), message)
+        return self.jobs.start("itch", lambda p: sync_all(self.cfg, p), message)
 
 
 def is_local(request: Request) -> bool:

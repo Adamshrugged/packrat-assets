@@ -78,9 +78,10 @@ def discover(cfg):
         containers = {_abs(root, c) for c in root.containers}
         if root.auto:
             containers.add(os.path.normcase(root.path))
-        elif cfg.itch_download_dir and inside(cfg.itch_download_dir, root.path):
-            # The download folder holds one folder per purchase: each is a pack, not the folder as a whole.
-            containers.add(os.path.normcase(os.path.normpath(cfg.itch_download_dir)))
+        else:
+            # A download folder holds one folder per purchase: each is a pack, not the folder as a whole.
+            containers |= {os.path.normcase(os.path.normpath(d)) for d in cfg.download_dirs.values()
+                           if d and inside(d, root.path)}
         base = os.path.normcase(root.path)
         transparent = set()
         for p in containers:
@@ -290,7 +291,7 @@ def scan_paths(cfg, paths: list[str]) -> dict:
     if len(specs) < len(paths):
         log.info("indexed %d packs for %d new files; files outside the library roots wait for a Rescan",
                  len(specs), len(paths))
-    from .itch import match
+    from .stores import match
     match(cfg, conn)
     from .thumbs import cover_rows, make_thumbs
     make_thumbs(cfg, cover_rows(conn, [s.key for s in specs]))
@@ -354,7 +355,7 @@ def scan(cfg, progress=None) -> dict:
                                  f"({db.placeholders(ids)}))", ids)
                     conn.execute(f"DELETE FROM packs WHERE id IN ({db.placeholders(ids)})", ids)
     # Re-link store purchases to the (possibly changed) library; also refreshes pack search.
-    from .itch import match
+    from .stores import match
     match(cfg, conn)
     from .thumbs import cover_rows, make_thumbs
     covers = make_thumbs(cfg, cover_rows(conn), progress, "making pack covers")  # the library grid never waits

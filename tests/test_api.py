@@ -98,7 +98,7 @@ def test_purchases_download_and_cancel(app, monkeypatch):
     item = client.get("/api/store/items").json()[0]
     assert item["status"] == "missing" and [f["extra"] for f in item["files"]] == [False, False, False, True]
 
-    def fake_download(cfg, fid, dest, step):
+    def fake_download(cfg, fid, dest, step, session=None):
         for got in (0, 5, 10):
             step(got, 10)
             time.sleep(0.15)
@@ -114,7 +114,7 @@ def test_purchases_download_and_cancel(app, monkeypatch):
     assert client.get("/api/activity").json()["items"] == {"1": "running"}
     client.post("/api/downloads/cancel")
     done = wait_idle(client, "download")
-    assert done["result"]["itch"]["cancelled"]
+    assert done["result"]["cancelled"]
     assert client.get("/api/activity").json()["items"] == {}
     assert os.listdir(os.path.join(cfg.itch_download_dir, "Owned Pack"))  # the finished file was kept
 

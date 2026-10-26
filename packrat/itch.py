@@ -4,7 +4,6 @@ Uses the official API (https://api.itch.io) with the personal API key (Settings,
 sent as a header so it never appears in URLs or error messages. Public asset pages are
 fetched without credentials for tags/license.
 """
-import hashlib
 import html
 import json
 import logging
@@ -14,12 +13,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 from . import db, net, secrets
-from .net import UA
-from .scanner import PACK_ARCHIVES, norm_name
+from .stores import StoreError, fetch_to, match, pending_files, safe_name
 
 log = logging.getLogger("packrat.itch")
 
@@ -28,12 +25,8 @@ UPLOADS_MAX_AGE = 7 * 86400
 META_MAX_AGE = 30 * 86400
 
 
-class ItchError(Exception):
+class ItchError(StoreError):
     pass
-
-
-class DownloadCancelled(Exception):
-    """Raised from a progress callback to stop a download batch."""
 
 
 class KeyRejected(ItchError):
@@ -403,169 +396,7 @@ def parse_cells(body: str) -> list[dict]:
     return out
 
 
-# ------------------------------------------------------------------ matching
-
-def match(cfg, conn=None) -> dict:
-    """Link each purchased file to the library: exact name+size, then unique size, then pack name."""
-    own = conn is None
-    conn = conn or db.connect(cfg)
-    by_name_size, by_size = {}, defaultdict(list)
-    for r in conn.execute("SELECT f.id, f.pack_id, f.name, f.size, f.ext FROM files f JOIN packs p ON p.id=f.pack_id "
-                          "WHERE f.member IS NULL AND p.missing=0"):
-        by_name_size[(r["name"].lower(), r["size"])] = (r["id"], r["pack_id"])
-        if r["ext"] in PACK_ARCHIVES and (r["size"] or 0) >= 256 * 1024:
-            by_size[r["size"]].append((r["id"], r["pack_id"]))
-    packs_by_norm = defaultdict(list)
-    for r in conn.execute("SELECT id, norm_name, kind, path, size FROM packs WHERE missing=0"):
-        packs_by_norm[r["norm_name"]].append(r["id"])
-        if r["kind"] == "archive":  # an archive pack *is* the downloaded file
-            by_name_size[(os.path.basename(r["path"]).lower(), r["size"])] = (None, r["id"])
-            if (r["size"] or 0) >= 256 * 1024:
-                by_size[r["size"]].append((None, r["id"]))
-
-    counts = defaultdict(int)
-    rows = conn.execute("SELECT sf.id, sf.filename, sf.size, si.title, "
-                        "(SELECT count(*) FROM store_files x WHERE x.item_id=sf.item_id) AS n "
-                        "FROM store_files sf JOIN store_items si ON si.id=sf.item_id").fetchall()
-    with conn:
-        for r in rows:
-            fid = pid = kind = None
-            stem_norm = norm_name(r["filename"])
-            if (r["filename"].lower(), r["size"]) in by_name_size:
-                fid, pid = by_name_size[(r["filename"].lower(), r["size"])]
-                kind = "exact"
-            elif r["size"] and len(by_size.get(r["size"], [])) == 1:
-                fid, pid = by_size[r["size"]][0]
-                kind = "size"
-            elif stem_norm and packs_by_norm.get(stem_norm):
-                pid, kind = packs_by_norm[stem_norm][0], "name"
-            elif r["n"] == 1 and packs_by_norm.get(norm_name(r["title"])):
-                pid, kind = packs_by_norm[norm_name(r["title"])][0], "title"
-            counts[kind or "missing"] += 1
-            conn.execute("UPDATE store_files SET match_file_id=?, match_pack_id=?, match_kind=? WHERE id=?",
-                         (fid, pid, kind, r["id"]))
-        db.refresh_pack_fts(conn)
-    if own:
-        conn.close()
-    return {"files_" + k: v for k, v in counts.items()}
-
-
-# ------------------------------------------------------------------ downloading
-
-# Extras shipped next to the actual assets (engine packages, installers, docs). They are listed but
-# don't count toward "downloaded" and aren't fetched by bulk downloads.
-SIDE_FILES = re.compile(r"\.(txt|pdf|md|url|yymps|yyz|exe|dmg|apk|html?)$|license|readme|\bhtml\b|demo", re.I)
-
-
-def is_pending(matched: bool, filename: str) -> bool:
-    """The one rule for "this purchased file still needs fetching", used by downloads, the Purchases list
-    and its buttons: not yet found in the asset library, and not an extra (readme, installer…)."""
-    return not matched and not SIDE_FILES.search(filename)
-
-
-def pending_files(conn, item_ids: list[int] | None = None, new_only: bool = False) -> list:
-    """itch.io files of the given purchases that still need downloading (see is_pending)."""
-    where, args = ["si.hidden = 0"], []
-    if item_ids is not None:
-        where.append(f"si.id IN ({db.placeholders(item_ids)})")
-        args.extend(item_ids)
-    if new_only:
-        where.append("si.first_seen IS NOT NULL")
-    rows = conn.execute(f"SELECT sf.*, si.title FROM store_files sf JOIN store_items si ON si.id = sf.item_id "
-                        f"WHERE {' AND '.join(where)} ORDER BY si.purchased_at, sf.filename", args).fetchall()
-    return [r for r in rows if is_pending(r["match_pack_id"] is not None, r["filename"])]
-
-
-def download_many(cfg, file_ids: list[int], progress=None) -> dict:
-    try:
-        cfg.ensure_download_dir()
-    except FileNotFoundError as e:
-        raise ItchError(str(e)) from None
-    conn = db.connect(cfg)
-    rows = {r["id"]: r for r in conn.execute(
-        f"SELECT id, filename, match_pack_id FROM store_files WHERE id IN ({db.placeholders(file_ids)})", file_ids)}
-    conn.close()
-    # a queued download may find some files already fetched by the one before it
-    file_ids = [f for f in file_ids if f in rows and rows[f]["match_pack_id"] is None]
-    done, failed, cancelled = [], [], False
-    try:
-        for i, fid in enumerate(file_ids):
-            name = rows[fid]["filename"]
-
-            def step(got, size, i=i, name=name):
-                if progress:
-                    pct = f" {got * 100 // size}%" if size else ""
-                    progress(i, len(file_ids), f"Downloading {name}{pct}")
-            step(0, 0)
-            try:
-                done.append(download(cfg, fid, cfg.itch_download_dir, step))
-            except DownloadCancelled:
-                raise
-            except Exception as e:
-                failed.append(f"{name}: {e}")
-                log.warning("download failed: %s: %s", name, e)
-    except DownloadCancelled:
-        cancelled = True  # the file in progress is discarded; finished ones are kept and indexed below
-    if done:
-        if progress and not cancelled:
-            progress(len(file_ids), len(file_ids), "Indexing new downloads…")
-        from .scanner import scan_paths
-        scan_paths(cfg, done)  # index just the new packs; also re-matches purchases
-    return {"downloaded": len(done), "failed": len(failed), "errors": failed[:10], "cancelled": cancelled}
-
-
-def sync_and_auto_download(cfg, progress=None) -> dict:
-    result = sync(cfg, progress)
-    if cfg.itch_auto_download:
-        conn = db.connect(cfg)
-        new = [r["id"] for r in pending_files(conn, new_only=True)]
-        conn.close()
-        if new:
-            result["auto_download"] = download_many(cfg, new, progress)
-    return result
-
-
-def fetch_to(url: str, target: str, progress=None, md5: str | None = None, size_hint: int | None = None) -> int:
-    """Stream a signed download link (no credentials sent) to target via a .part file. It's kept only if
-    complete (the server's Content-Length) and, when an MD5 is given, matching it. Returns the size."""
-    tmp = target + ".part"
-    got = 0
-    digest = hashlib.md5() if md5 else None
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": UA})
-        with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as fh:
-            expected = int(r.headers.get("Content-Length") or 0) or None
-            while chunk := r.read(1 << 20):
-                fh.write(chunk)
-                if digest:
-                    digest.update(chunk)
-                got += len(chunk)
-                if progress:
-                    progress(got, expected or size_hint or 0)
-        if expected and got != expected:
-            raise ItchError(f"incomplete download ({got} of {expected} bytes)")
-        if digest and digest.hexdigest() != md5:
-            raise ItchError("checksum mismatch; download discarded")
-    except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)  # never leave half-written .part files behind
-        raise
-    os.replace(tmp, target)
-    return got
-
-
-WINDOWS_RESERVED = re.compile(r"(con|prn|aux|nul|com\d|lpt\d)(\..*)?", re.I)
-
-
-def safe_name(name: str) -> str:
-    """A file or folder name that's valid on Windows and Linux."""
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")[:120].rstrip(" .")
-    if WINDOWS_RESERVED.fullmatch(name):
-        name = "_" + name
-    return name or "untitled"
-
-
-def download(cfg, store_file_id: int, dest_root: str, progress=None) -> str:
+def download(cfg, store_file_id: int, dest_root: str, progress=None, session: dict | None = None) -> str:
     """Download one purchased file into <dest_root>/<item title>/<filename>. Returns the path."""
     conn = db.connect(cfg)
     row = conn.execute("SELECT sf.*, si.title, si.key_id FROM store_files sf JOIN store_items si "
@@ -573,7 +404,10 @@ def download(cfg, store_file_id: int, dest_root: str, progress=None) -> str:
     conn.close()
     if row is None:
         raise ItchError("unknown file")
-    client = client_from_secrets()
+    session = {} if session is None else session
+    if "itch" not in session:  # one client per download batch
+        session["itch"] = client_from_secrets()
+    client = session["itch"]
     url = client.download_url(row["upload_id"], row["key_id"])
     folder = os.path.join(dest_root, safe_name(row["title"]))
     os.makedirs(folder, exist_ok=True)

@@ -40,7 +40,7 @@ def write_private(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
-def save(cfg, roots: list[dict], itch: dict) -> None:
+def save(cfg, roots: list[dict], itch: dict, humble: dict | None = None) -> None:
     """Write config.toml from the given settings, then reload it into cfg (in place, so the running app
     sees the change). Settings not edited in the UI (data folder, server) are kept as they are."""
     data = {
@@ -52,6 +52,8 @@ def save(cfg, roots: list[dict], itch: dict) -> None:
                  else None,
                  "sync_every_hours": float(itch.get("sync_every_hours") or 0),  # 0 = off
                  "auto_download": bool(itch.get("auto_download"))},
+        "humble": {"download_dir": (humble or {}).get("download_dir")
+                   if (humble or {}).get("download_dir") not in (None, config.default_humble_download_dir()) else None},
         "roots": [{"label": r.get("label") or None, "path": r["path"], "display": r.get("display") or None,
                    "containers": r.get("containers") or None, "ignore": r.get("ignore") or None}
                   for r in roots],

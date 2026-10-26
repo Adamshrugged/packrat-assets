@@ -15,8 +15,7 @@ def main() -> None:
                                         "browser and adds a tray icon to reopen or quit it.")
     sub.add_parser("scan", help="index the library folders")
     sub.add_parser("serve", help="run as a server only (no browser, no tray icon), e.g. on a NAS")
-    it = sub.add_parser("itch-sync", help="import itch.io purchases and match them to the library")
-    it.add_argument("--force", action="store_true", help="re-fetch file lists and page info for everything")
+    sub.add_parser("sync", help="import purchases from the connected stores and match them to the library")
     th = sub.add_parser("thumbs", help="pre-generate thumbnails")
     th.add_argument("--all", action="store_true", help="every image, not just pack covers")
     mc = sub.add_parser("mcp", help="run the MCP server for AI agents (Packrat must be running)")
@@ -66,14 +65,14 @@ def main() -> None:
         result = scan(cfg, progress)
         print(f"\nDone: {result}")
 
-    elif args.cmd == "itch-sync":
-        from .itch import sync
+    elif args.cmd == "sync":
+        from .stores import sync_all
 
         def progress(i, n, msg):
             sys.stdout.write(f"\r[{i}/{n}] {msg:<40}")
             sys.stdout.flush()
 
-        print(f"\nDone: {sync(cfg, progress, force=args.force)}")
+        print(f"\nDone: {sync_all(cfg, progress)}")
 
     elif args.cmd == "serve":
         import uvicorn

@@ -10,11 +10,13 @@ COPY pyproject.toml README.md LICENSE /tmp/src/
 COPY packrat /tmp/src/packrat
 RUN pip install --no-cache-dir /tmp/src && rm -rf /tmp/src
 
-# Settings (and the password) in /config, database and previews in /data, itch.io downloads in /downloads.
+# Settings (and the password) in /config, database and previews in /data, itch.io downloads in /downloads,
+# Humble downloads in /humble.
 # It listens on the network, so other computers sign in; the setup code for the first password is in the log.
 ENV XDG_CONFIG_HOME=/config XDG_DATA_HOME=/data HOME=/data \
-    PACKRAT_HOST=0.0.0.0 PACKRAT_PORT=8765 PACKRAT_DOWNLOADS=/downloads PYTHONUNBUFFERED=1
-RUN mkdir -p /config /data /downloads /library && chown 1000:1000 /config /data /downloads
+    PACKRAT_HOST=0.0.0.0 PACKRAT_PORT=8765 PACKRAT_DOWNLOADS=/downloads \
+    PACKRAT_HUMBLE_DOWNLOADS=/humble PYTHONUNBUFFERED=1
+RUN mkdir -p /config /data /downloads /humble /library && chown 1000:1000 /config /data /downloads /humble
 USER 1000:1000
 WORKDIR /data
 VOLUME ["/config", "/data"]

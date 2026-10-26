@@ -9,7 +9,7 @@ Packrat is a desktop library for the game assets you've bought: sprites, tileset
 ## What it does
 
 - **Browse your library.** Search by name and tag, preview images inside zips without unpacking them, and keep notes and license details per pack.
-- **Sync your itch.io purchases.** Packrat downloads what you've bought into a folder you choose, skipping packs you already have.
+- **Sync your purchases** from itch.io and (experimental) Humble Bundle. Packrat downloads what you've bought into folders you choose, skipping packs you already have.
 - **Add free assets.** Search itch.io from Packrat and add free packs in one click.
 - **Connect AI agents.** A built-in [MCP](https://modelcontextprotocol.io) server lets agents such as Claude search your library and copy assets into a project.
 
@@ -19,10 +19,10 @@ Packrat only manages files **you** bought or downloaded. It never uploads, share
 
 ## Platforms and stores
 
-| | v0.1 | Later |
+| | Now | Later |
 | --- | --- | --- |
 | Platforms | Linux, Windows | macOS |
-| Stores | itch.io | Humble Bundle (experimental) |
+| Stores | itch.io, Humble Bundle (experimental) | Others by request |
 
 ## Install
 
