@@ -15,6 +15,9 @@ from ..guard import is_loopback
 from . import Context, is_local
 
 
+WINDOWS_CLI = '"$env:LOCALAPPDATA\\Programs\\Packrat\\packrat-cli.exe"'  # where the installer puts it
+
+
 class RootIn(BaseModel):
     path: str
     label: str | None = None
@@ -23,20 +26,20 @@ class RootIn(BaseModel):
     ignore: list[str] = []  # folders inside it to leave out, absolute or relative to it
 
 
-class ItchIn(BaseModel):
+class StoreIn(BaseModel):
     download_dir: str | None = None
-    sync_every_hours: float = 0
+
+
+class SyncIn(BaseModel):
+    every_hours: float = 0
     auto_download: bool = False
-
-
-class HumbleIn(BaseModel):
-    download_dir: str | None = None
 
 
 class SettingsIn(BaseModel):
     roots: list[RootIn]
-    itch: ItchIn
-    humble: HumbleIn = HumbleIn()
+    itch: StoreIn = StoreIn()
+    humble: StoreIn = StoreIn()
+    sync: SyncIn = SyncIn()
     start_at_login: bool | None = None
 
 
@@ -53,15 +56,19 @@ def router(ctx: Context) -> APIRouter:
     cfg = ctx.cfg
     conn = Depends(ctx.conn)
 
+    def remote_mcp_command(request: Request, program_path: str) -> str:
+        return (f"claude mcp add packrat --scope user -- {program_path} mcp --url "
+                f"{str(request.base_url).rstrip('/')} --token {ctx.auth.api_token()}")
+
     def settings_out(c: sqlite3.Connection, request: Request) -> dict:
         return {
             "first_run": not os.path.exists(cfg.source),
             "roots": [{"label": x.label, "path": x.path, "display": x.display if x.display != x.path else None,
                        "containers": x.containers, "ignore": x.ignore} for x in cfg.roots if not x.auto],
-            "itch": {"download_dir": cfg.itch_download_dir, "sync_every_hours": cfg.itch_sync_hours,
-                     "auto_download": cfg.itch_auto_download, "has_key": bool(secrets.itch_key()),
+            "itch": {"download_dir": cfg.itch_download_dir, "has_key": bool(secrets.itch_key()),
                      "user": db.get_kv(c, "itch_user")},
             "humble": {"download_dir": cfg.humble_download_dir, "connected": stores.connected()["humble"]},
+            "sync": {"every_hours": cfg.sync_hours, "auto_download": cfg.auto_download},
             "version": __version__,
             "log_path": log if os.path.exists(log := os.path.join(cfg.data_dir, "packrat.log")) else None,
             # Opens GitHub's issue form with the version and system filled in; nothing is sent automatically.
@@ -75,10 +82,11 @@ def router(ctx: Context) -> APIRouter:
             "can_quit": ctx.quit is not None and is_local(request),
             "auth": {"required": ctx.auth.required, "password_set": ctx.auth.password_set(),
                      "local": is_local(request)},
-            # For Claude on other computers (needs Packrat installed there too)
-            "mcp_remote_command": (f"claude mcp add packrat --scope user -- packrat mcp --url "
-                                   f"{str(request.base_url).rstrip('/')} --token {ctx.auth.api_token()}"
-                                   if ctx.auth.required else None),
+            # For Claude on other computers (needs Packrat installed there too). The Windows installer doesn't
+            # put packrat on PATH, so that command names the installed program (for PowerShell).
+            **({"mcp_remote_command": remote_mcp_command(request, "packrat"),
+                "mcp_remote_command_windows": remote_mcp_command(request, WINDOWS_CLI)}
+               if ctx.auth.required else {"mcp_remote_command": None, "mcp_remote_command_windows": None}),
         }
 
     @r.get("/settings")
@@ -116,14 +124,14 @@ def router(ctx: Context) -> APIRouter:
             seen.add(os.path.normcase(path))
             roots.append({**x.model_dump(), "path": path,
                           "containers": inner_folders(path, x.containers), "ignore": inner_folders(path, x.ignore)})
-        download_dir = download_folder(req.itch.download_dir, config.default_download_dir())
-        humble_dir = download_folder(req.humble.download_dir, config.default_humble_download_dir())
-        if req.itch.sync_every_hours < 0:
+        download_dirs = {store: download_folder(getattr(req, store).download_dir, config.DEFAULT_DOWNLOADS[store]())
+                         for store in config.DEFAULT_DOWNLOADS}
+        if req.sync.every_hours < 0:
             raise HTTPException(400, "sync interval can't be negative")
         if req.start_at_login is not None and is_local(request) and autostart.supported():
             autostart.set_enabled(req.start_at_login)
         old_roots = [(x.path, x.containers, x.ignore) for x in cfg.roots]
-        settings.save(cfg, roots, {**req.itch.model_dump(), "download_dir": download_dir}, {"download_dir": humble_dir})
+        settings.save(cfg, roots, download_dirs, req.sync.model_dump())
         rescan = [(x.path, x.containers, x.ignore) for x in cfg.roots] != old_roots
         if rescan:
             ctx.start_scan("scanning library folders…")
@@ -144,11 +152,14 @@ def router(ctx: Context) -> APIRouter:
         ctx.start_sync()
         return settings_out(c, request)
 
+    def forget_secret(name: str) -> None:
+        values = secrets.load()
+        values.pop(name, None)
+        settings.save_secrets(values)
+
     @r.delete("/settings/itch-key")
     def delete_itch_key(request: Request, c: sqlite3.Connection = conn):
-        values = secrets.load()
-        values.pop("itch_api_key", None)
-        settings.save_secrets(values)
+        forget_secret("itch_api_key")
         with c:
             c.execute("DELETE FROM kv WHERE key='itch_user'")
         return settings_out(c, request)
@@ -177,9 +188,7 @@ def router(ctx: Context) -> APIRouter:
 
     @r.delete("/settings/humble-cookie")
     def delete_humble_cookie(request: Request, c: sqlite3.Connection = conn):
-        values = secrets.load()
-        values.pop("humble_session_cookie", None)
-        settings.save_secrets(values)
+        forget_secret("humble_session_cookie")
         return settings_out(c, request)
 
     @r.get("/browse")

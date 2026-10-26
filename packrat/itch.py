@@ -7,7 +7,6 @@ fetched without credentials for tags/license.
 import html
 import json
 import logging
-import os
 import re
 import time
 import urllib.error
@@ -16,7 +15,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from . import db, net, secrets
-from .stores import StoreError, fetch_to, match, pending_files, safe_name
+from .stores import StoreError, match, pending_files
 
 log = logging.getLogger("packrat.itch")
 
@@ -396,21 +395,8 @@ def parse_cells(body: str) -> list[dict]:
     return out
 
 
-def download(cfg, store_file_id: int, dest_root: str, progress=None, session: dict | None = None) -> str:
-    """Download one purchased file into <dest_root>/<item title>/<filename>. Returns the path."""
-    conn = db.connect(cfg)
-    row = conn.execute("SELECT sf.*, si.title, si.key_id FROM store_files sf JOIN store_items si "
-                       "ON si.id=sf.item_id WHERE sf.id=?", (store_file_id,)).fetchone()
-    conn.close()
-    if row is None:
-        raise ItchError("unknown file")
-    session = {} if session is None else session
+def download_link(row, session: dict) -> tuple[str, str | None]:
+    """A signed link for one purchased file, and the MD5 to check it against (itch.io's are kept current)."""
     if "itch" not in session:  # one client per download batch
         session["itch"] = client_from_secrets()
-    client = session["itch"]
-    url = client.download_url(row["upload_id"], row["key_id"])
-    folder = os.path.join(dest_root, safe_name(row["title"]))
-    os.makedirs(folder, exist_ok=True)
-    target = os.path.join(folder, safe_name(row["filename"]))
-    fetch_to(url, target, progress, md5=row["md5"], size_hint=row["size"])  # itch.io's MD5s are kept current
-    return target
+    return session["itch"].download_url(row["upload_id"], row["key_id"]), row["md5"]

@@ -6,7 +6,7 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
-from packrat import config, db, itch
+from packrat import config, db, itch, stores
 from packrat.app import create_app
 from conftest import toml_str
 
@@ -75,8 +75,8 @@ def test_settings_round_trip(app, tmp_path):
     other = tmp_path / "more"
     other.mkdir()
     out = client.put("/api/settings", json={"roots": [{"path": str(tmp_path / "lib")}, {"path": str(other)}],
-                                            "itch": {"sync_every_hours": 6, "auto_download": False}}).json()
-    assert out["rescan"] and len(out["roots"]) == 2 and cfg.itch_sync_hours == 6
+                                            "sync": {"every_hours": 6}}).json()
+    assert out["rescan"] and len(out["roots"]) == 2 and cfg.sync_hours == 6
     assert client.put("/api/settings", json={"roots": [{"path": "/nope"}], "itch": {}}).status_code == 400
     wait_idle(client, "scan")
 
@@ -98,15 +98,14 @@ def test_purchases_download_and_cancel(app, monkeypatch):
     item = client.get("/api/store/items").json()[0]
     assert item["status"] == "missing" and [f["extra"] for f in item["files"]] == [False, False, False, True]
 
-    def fake_download(cfg, fid, dest, step, session=None):
+    def fake_fetch(url, target, progress=None, md5=None, size_hint=None):
         for got in (0, 5, 10):
-            step(got, 10)
+            progress(got, 10)
             time.sleep(0.15)
-        path = os.path.join(dest, "Owned Pack", f"part{fid}.png")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        open(path, "wb").write(b"x")
-        return path
-    monkeypatch.setattr(itch, "download", fake_download)
+        open(target, "wb").write(b"x")
+        return 1
+    monkeypatch.setattr(itch, "download_link", lambda row, session: ("https://example.invalid/file", None))
+    monkeypatch.setattr(stores, "fetch_to", fake_fetch)
 
     assert not client.post("/api/store/download", json={"file_ids": file_ids[:2]}).json()["queued_behind"]
     assert client.post("/api/store/download", json={"file_ids": file_ids[2:]}).json()["queued_behind"]
@@ -122,10 +121,10 @@ def test_purchases_download_and_cancel(app, monkeypatch):
 def test_failed_sync_waits_a_full_interval(app):
     client, cfg = app
     c = db.connect(cfg)
-    assert db.get_kv(c, "itch_last_attempt") is None
+    assert db.get_kv(c, "last_sync_attempt") is None
     client.post("/api/store/sync")  # no key: fails at once
-    assert "Settings" in wait_idle(client, "itch")["error"]
-    assert float(db.get_kv(c, "itch_last_attempt")) > time.time() - 60  # the scheduler counts from this
+    assert "Settings" in wait_idle(client, "sync")["error"]
+    assert float(db.get_kv(c, "last_sync_attempt")) > time.time() - 60  # the scheduler counts from this
     c.close()
 
 

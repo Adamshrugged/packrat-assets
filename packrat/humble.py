@@ -16,10 +16,9 @@ import re
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
 
 from . import db, net, secrets
-from .stores import StoreError, fetch_to, match, safe_name
+from .stores import StoreError, match
 
 log = logging.getLogger("packrat.humble")
 
@@ -184,29 +183,15 @@ def _store(conn, it: dict, first_import: bool) -> None:
 
 # ------------------------------------------------------------------ downloading
 
-def download(cfg, store_file_id: int, dest_root: str, progress=None, session: dict | None = None) -> str:
-    """Download one purchased file into <dest_root>/<product title>/<filename>. Returns the path."""
-    conn = db.connect(cfg)
-    row = conn.execute("SELECT sf.*, si.title, si.key_id FROM store_files sf JOIN store_items si "
-                       "ON si.id=sf.item_id WHERE sf.id=?", (store_file_id,)).fetchone()
-    conn.close()
-    if row is None:
-        raise HumbleError("unknown file")
-    session = {} if session is None else session
+def download_link(row, session: dict) -> tuple[str, None]:
+    """A fresh link for one purchased file (they expire). No MD5 to check: Humble's listed MD5 (and size)
+    go stale when a publisher replaces a file."""
     if "humble" not in session:  # one client and set of orders per download batch
         session["humble"] = (client_from_secrets(), {})
     client, orders = session["humble"]
-    if row["key_id"] not in orders:  # download links expire, so they're fetched fresh for each batch
+    if row["key_id"] not in orders:
         orders[row["key_id"]] = client.order(row["key_id"])
-    url = _fresh_url(orders[row["key_id"]], row)
-    folder = os.path.join(dest_root, safe_name(row["title"]))
-    os.makedirs(folder, exist_ok=True)
-    target = os.path.join(folder, safe_name(row["filename"]))
-    # No MD5 check: Humble's listed MD5 (and size) go stale when a publisher replaces a file.
-    got = fetch_to(url, target, progress, size_hint=row["size"])
-    with closing(db.connect(cfg)) as c, c:
-        c.execute("UPDATE store_files SET size=? WHERE id=?", (got, store_file_id))
-    return target
+    return _fresh_url(orders[row["key_id"]], row), None
 
 
 def _fresh_url(order: dict, row) -> str:

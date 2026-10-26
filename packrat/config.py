@@ -27,9 +27,8 @@ class Config:
     sevenzip: str | None
     itch_download_dir: str | None = None
     humble_download_dir: str | None = None
-    # Sync schedule and auto-download apply to every connected store (kept under [itch] in config.toml)
-    itch_sync_hours: float = 24
-    itch_auto_download: bool = False
+    sync_hours: float = 24  # for every connected store
+    auto_download: bool = False
     allowed_hosts: list[str] = field(default_factory=list)
     source: str = ""  # the config.toml this was loaded from (it may not exist yet)
 
@@ -60,7 +59,7 @@ class Config:
         """Translate a server-side path into the path the user sees (e.g. a mapped network drive)."""
         shown = path
         for src, display in [(r.path, r.display) for r in self.roots]:
-            if os.path.normcase(path).startswith(os.path.normcase(src)):
+            if inside(path, src):  # not a sibling that starts the same, like assets-old
                 shown = display + path[len(src):]
                 break
         sep = "\\" if "\\" in shown or ":" in shown[:3] else "/"
@@ -146,7 +145,7 @@ def load(path: str | None = None) -> Config:
             ignore=list(r.get("ignore", [])),
         ))
 
-    itch, humble = raw.get("itch", {}), raw.get("humble", {})
+    itch, humble, sync = raw.get("itch", {}), raw.get("humble", {}), raw.get("sync", {})
     downloads = {store: os.path.normpath(os.path.expanduser(section.get("download_dir") or DEFAULT_DOWNLOADS[store]()))
                  for store, section in (("itch", itch), ("humble", humble))}
     for store, folder in downloads.items():
@@ -169,8 +168,9 @@ def load(path: str | None = None) -> Config:
         sevenzip=paths.get("sevenzip") or find_7z(),
         itch_download_dir=downloads["itch"],
         humble_download_dir=downloads["humble"],
-        itch_sync_hours=float(itch.get("sync_every_hours", 24)),
-        itch_auto_download=bool(itch.get("auto_download", False)),
+        # [sync]; before 0.2.1 these were under [itch]
+        sync_hours=float(sync.get("every_hours", itch.get("sync_every_hours", 24))),
+        auto_download=bool(sync.get("auto_download", itch.get("auto_download", False))),
         allowed_hosts=[h.lower() for h in srv.get("allowed_hosts", [])],
         source=path,
     )

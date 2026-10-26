@@ -317,7 +317,7 @@ def router(ctx: Context) -> APIRouter:
     @r.get("/activity")
     def activity():
         """Scans, syncs and downloads in progress, for the header indicator and per-purchase progress."""
-        return {"scan": ctx.jobs.status("scan"), "itch": ctx.jobs.status("itch"),
+        return {"scan": ctx.jobs.status("scan"), "sync": ctx.jobs.status("sync"),
                 "download": ctx.jobs.status("download"), "items": ctx.downloads.items}
 
     return r

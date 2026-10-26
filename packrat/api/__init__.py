@@ -38,8 +38,8 @@ class Context:
         the scheduler waits a full interval even after a failed sync instead of retrying every minute."""
         from ..stores import sync_all
         with closing(db.connect(self.cfg)) as c:
-            db.set_kv(c, "itch_last_attempt", time.time())
-        return self.jobs.start("itch", lambda p: sync_all(self.cfg, p), message)
+            db.set_kv(c, "last_sync_attempt", time.time())
+        return self.jobs.start("sync", lambda p: sync_all(self.cfg, p), message)
 
 
 def is_local(request: Request) -> bool:

@@ -40,7 +40,7 @@ def write_private(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
-def save(cfg, roots: list[dict], itch: dict, humble: dict | None = None) -> None:
+def save(cfg, roots: list[dict], download_dirs: dict, sync: dict) -> None:
     """Write config.toml from the given settings, then reload it into cfg (in place, so the running app
     sees the change). Settings not edited in the UI (data folder, server) are kept as they are."""
     data = {
@@ -48,12 +48,11 @@ def save(cfg, roots: list[dict], itch: dict, humble: dict | None = None) -> None
         "server": {"host": cfg.host if cfg.host != "127.0.0.1" else None,
                    "port": cfg.port if cfg.port != 8765 else None,
                    "allowed_hosts": cfg.allowed_hosts or None},
-        "itch": {"download_dir": itch.get("download_dir") if itch.get("download_dir") != config.default_download_dir()
-                 else None,
-                 "sync_every_hours": float(itch.get("sync_every_hours") or 0),  # 0 = off
-                 "auto_download": bool(itch.get("auto_download"))},
-        "humble": {"download_dir": (humble or {}).get("download_dir")
-                   if (humble or {}).get("download_dir") not in (None, config.default_humble_download_dir()) else None},
+        # download folders are only written when they aren't the default
+        **{store: {"download_dir": folder if folder not in (None, config.DEFAULT_DOWNLOADS[store]()) else None}
+           for store, folder in download_dirs.items()},
+        "sync": {"every_hours": float(sync.get("every_hours") or 0),  # 0 = off
+                 "auto_download": bool(sync.get("auto_download"))},
         "roots": [{"label": r.get("label") or None, "path": r["path"], "display": r.get("display") or None,
                    "containers": r.get("containers") or None, "ignore": r.get("ignore") or None}
                   for r in roots],

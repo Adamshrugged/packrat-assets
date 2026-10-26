@@ -39,15 +39,15 @@ def create_app(cfg, quit=None) -> FastAPI:
 
 
 def schedule_syncs(ctx: Context) -> None:
-    """Sync the connected stores every [itch] sync_every_hours while Packrat runs, counted from the last attempt."""
+    """Sync the connected stores every [sync] every_hours while Packrat runs, counted from the last attempt."""
     while True:
         time.sleep(60)
-        if ctx.cfg.itch_sync_hours <= 0 or not any(stores.connected().values()):
+        if ctx.cfg.sync_hours <= 0 or not any(stores.connected().values()):
             continue
         with closing(db.connect(ctx.cfg)) as c:
             last = max(float(db.get_kv(c, key, 0) or 0)
-                       for key in ("itch_last_sync", "humble_last_sync", "itch_last_attempt"))
-        if time.time() - last >= ctx.cfg.itch_sync_hours * 3600:
+                       for key in ("itch_last_sync", "humble_last_sync", "last_sync_attempt"))
+        if time.time() - last >= ctx.cfg.sync_hours * 3600:
             ctx.start_sync("scheduled sync…")
 
 

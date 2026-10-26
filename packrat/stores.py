@@ -135,11 +135,10 @@ def pending_files(conn, item_ids: list[int] | None = None, new_only: bool = Fals
 def download_many(cfg, file_ids: list[int], progress=None) -> dict:
     """Download purchased files into their store's download folder (one folder per purchase), then index them.
     A progress callback may raise DownloadCancelled: finished files are kept and indexed."""
-    conn = db.connect(cfg)
-    rows = {r["id"]: r for r in conn.execute(
-        f"SELECT sf.id, sf.filename, sf.match_pack_id, si.store FROM store_files sf JOIN store_items si "
-        f"ON si.id = sf.item_id WHERE sf.id IN ({db.placeholders(file_ids)})", file_ids)}
-    conn.close()
+    with closing(db.connect(cfg)) as conn:
+        rows = {r["id"]: r for r in conn.execute(
+            f"SELECT sf.*, si.title, si.key_id, si.store FROM store_files sf JOIN store_items si "
+            f"ON si.id = sf.item_id WHERE sf.id IN ({db.placeholders(file_ids)})", file_ids)}
     # a queued download may find some files already fetched by the one before it
     file_ids = [f for f in file_ids if f in rows and rows[f]["match_pack_id"] is None]
     done, failed, cancelled = [], [], False
@@ -158,7 +157,7 @@ def download_many(cfg, file_ids: list[int], progress=None) -> dict:
                     folder = cfg.ensure_download_dir(store)
                 except FileNotFoundError as e:
                     raise StoreError(str(e)) from None
-                done.append(module(store).download(cfg, fid, folder, step, session))
+                done.append(_download(cfg, rows[fid], folder, step, session))
             except DownloadCancelled:
                 raise
             except Exception as e:
@@ -172,6 +171,19 @@ def download_many(cfg, file_ids: list[int], progress=None) -> dict:
         from .scanner import scan_paths
         scan_paths(cfg, done)  # index just the new packs; also re-matches purchases
     return {"downloaded": len(done), "failed": len(failed), "errors": failed[:10], "cancelled": cancelled}
+
+
+def _download(cfg, row, dest_root: str, progress, session: dict) -> str:
+    """Download one purchased file into <dest_root>/<purchase title>/<filename>. Returns the path."""
+    url, md5 = module(row["store"]).download_link(row, session)
+    folder = os.path.join(dest_root, safe_name(row["title"]))
+    os.makedirs(folder, exist_ok=True)
+    target = os.path.join(folder, safe_name(row["filename"]))
+    got = fetch_to(url, target, progress, md5=md5, size_hint=row["size"])
+    if got != row["size"]:  # the store's listed size was out of date; matching needs the real one
+        with closing(db.connect(cfg)) as c, c:
+            c.execute("UPDATE store_files SET size=? WHERE id=?", (got, row["id"]))
+    return target
 
 
 def fetch_to(url: str, target: str, progress=None, md5: str | None = None, size_hint: int | None = None) -> int:
@@ -235,7 +247,7 @@ def sync_all(cfg, progress=None) -> dict:
             errors.append(f"{NAMES[store]}: {e}")
     out = {"stores": results, "errors": sum(r.get("errors", 0) for r in results.values()) + len(stores) - len(results),
            "error_samples": errors[:5]}
-    if cfg.itch_auto_download:
+    if cfg.auto_download:
         with closing(db.connect(cfg)) as conn:
             new = [r["id"] for r in pending_files(conn, new_only=True)]
         if new:

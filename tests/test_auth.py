@@ -77,8 +77,9 @@ def test_api_token_for_mcp(remote):
     assert client.get("/api/facets", headers={"Authorization": f"Bearer {token}"}).status_code == 200
     assert client.get("/api/facets", headers={"Authorization": "Bearer wrong"}).status_code == 401
     client.post("/api/auth/login", json={"password": "long enough"})
-    command = client.get("/api/settings").json()["mcp_remote_command"]
-    assert command.endswith(f"--url http://localhost --token {token}")
+    s = client.get("/api/settings").json()
+    assert s["mcp_remote_command"].endswith(f"-- packrat mcp --url http://localhost --token {token}")
+    assert "packrat-cli.exe\" mcp --url" in s["mcp_remote_command_windows"]  # the installer's program, by path
     client.post("/api/auth/token")
     mcp = TestClient(client.app, base_url="http://localhost")  # no session cookie, like the MCP server
     assert mcp.get("/api/facets", headers={"Authorization": f"Bearer {token}"}).status_code == 401  # replaced

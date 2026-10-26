@@ -21,15 +21,18 @@ def item_status(files: list[dict]) -> str:
     return "downloaded" if matched == len(main) else "partial" if matched else "missing"
 
 
-def load_items(ctx: Context, c: sqlite3.Connection, where: str = "1", args=()) -> list[dict]:
-    """Purchases matching an SQL condition, with their files, library matches and download state."""
+def load_items(ctx: Context, c: sqlite3.Connection, where: str = "1", args=(), asset: bool = True) -> list[dict]:
+    """Purchases matching an SQL condition, with their files, library matches and download state. With
+    asset=False, the Humble products skipped as not game assets instead."""
     items = {}
-    for r in c.execute(f"SELECT * FROM store_items WHERE asset = 1 AND ({where}) ORDER BY purchased_at DESC", args):
+    for r in c.execute(f"SELECT * FROM store_items WHERE asset = ? AND ({where}) ORDER BY purchased_at DESC",
+                       [int(asset), *args]):
         d = {k: r[k] for k in ("id", "store", "store_id", "title", "author", "author_url", "url", "cover_url",
                                "classification", "purchased_at", "license", "terms", "ai")}
         d["tags"] = split_tags(r["tags"])
         d["free"] = not r["key_id"]  # added as a free asset, not bought or claimed
         d["hidden"] = bool(r["hidden"])
+        d["asset"] = asset
         info = json.loads(r["info"] or "{}")
         d["page_gone"] = info.get("Page") == GONE
         d["bundle"] = info.get("Bundle", "")  # Humble: the bundle it came in
@@ -84,8 +87,8 @@ def router(ctx: Context) -> APIRouter:
     # ------------------------------------------------------------ purchases
 
     @r.get("/store/items")
-    def store_items(status: str = "", hidden: bool = False, c: sqlite3.Connection = conn):
-        items = load_items(ctx, c, "hidden = ?", [int(hidden)])
+    def store_items(status: str = "", hidden: bool = False, skipped: bool = False, c: sqlite3.Connection = conn):
+        items = load_items(ctx, c, "hidden = ?", [int(hidden)], asset=not skipped)
         return [i for i in items if i["status"] in status.split(",")] if status else items
 
     @r.post("/store/hide-many")
@@ -93,6 +96,13 @@ def router(ctx: Context) -> APIRouter:
         with c:
             c.executemany("UPDATE store_items SET hidden=? WHERE id=?", [(int(req.hidden), i) for i in req.item_ids])
         return {"ok": True, "count": len(req.item_ids)}
+
+    @r.post("/store/items/{item_id}/asset")
+    def count_as_asset(item_id: int, c: sqlite3.Connection = conn):
+        """List a skipped Humble product with the game assets (sync keeps this choice)."""
+        with c:
+            c.execute("UPDATE store_items SET asset=1 WHERE id=?", (item_id,))
+        return {"ok": True}
 
     @r.get("/store/summary")
     def store_summary(c: sqlite3.Connection = conn):
@@ -104,6 +114,8 @@ def router(ctx: Context) -> APIRouter:
         connected = stores.connected()
         return {
             "total": sum(counts.values()), "counts": counts,
+            # Humble products skipped as not game assets (books, games...), listed on their own tab
+            "skipped": c.execute("SELECT count(*) FROM store_items WHERE asset=0 AND hidden=0").fetchone()[0],
             "has_itch": connected["itch"], "has_humble": connected["humble"],
             "pending_files": len(pending), "pending_bytes": sum(f["size"] or 0 for f in pending),
             "pending_items": len({f["item_id"] for f in pending}),
@@ -111,7 +123,7 @@ def router(ctx: Context) -> APIRouter:
             "download_dirs": [cfg.display_path(cfg.download_dirs[s]) for s in sorted({f["store"] for f in pending})],
             "last_sync": max(float(db.get_kv(c, f"{s}_last_sync", 0) or 0) for s in stores.NAMES),
             "sync_errors": sum((json.loads(db.get_kv(c, f"{s}_last_errors", "[]") or "[]") for s in stores.NAMES), []),
-            "auto_download": cfg.itch_auto_download, "sync_every_hours": cfg.itch_sync_hours,
+            "auto_download": cfg.auto_download, "sync_every_hours": cfg.sync_hours,
         }
 
     @r.post("/store/sync")

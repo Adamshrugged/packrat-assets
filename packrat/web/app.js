@@ -506,6 +506,8 @@ function purchaseRow(it) {
     let where;
     if (f.pack_id) {
       where = `<span class="where"><span class="ok">✓</span> <a href="#/pack/${f.pack_id}">${esc(f.pack_name)}</a>${MATCH_NOTE[f.match] || ''}</span>`;
+    } else if (!it.asset) {
+      where = '';
     } else {
       where = `<span class="where">${f.extra ? 'extra, not needed' : '<span class="bad">✗</span> missing'}</span>
          <button class="btn small" data-dl-file="${f.id}">Download</button>`;
@@ -517,13 +519,14 @@ function purchaseRow(it) {
     it.license && esc(it.license), it.ai && `AI: ${esc(it.ai)}`, it.page_gone && 'page removed from itch.io']
     .filter(Boolean).join(' · ');
   const actions = [];
-  if (it.downloading) actions.push(`<button class="btn small primary" disabled data-progress-item="${it.id}">${it.downloading === 'running' ? 'Downloading…' : 'Queued…'}</button>`);
+  if (!it.asset) actions.push(`<button class="btn small primary" data-asset="${it.id}" title="Packrat skipped this as not a game asset">Count as asset</button>`);
+  else if (it.downloading) actions.push(`<button class="btn small primary" disabled data-progress-item="${it.id}">${it.downloading === 'running' ? 'Downloading…' : 'Queued…'}</button>`);
   else if (hasPending(it)) actions.push(`<button class="btn small primary" data-dl-item="${it.id}">Download</button>`);
   actions.push(`<button class="btn small" data-hide="${it.id}" data-hidden="${it.hidden ? 1 : 0}" title="Hide from these lists">${it.hidden ? 'Unhide' : 'Hide'}</button>`);
   return `<div class="purchase" data-item="${it.id}">
     <a class="pcover" href="${esc(it.url)}" target="_blank" rel="noopener">${it.cover_url ? `<img src="${esc(it.cover_url)}" alt="" loading="lazy">` : ''}</a>
     <div class="pbody">
-      <div class="ptitle">${extLink(it.url, esc(it.title))}<span class="pill st-${it.status}">${STATUS[it.status]}</span><span class="chip">${STORE_NAME[it.store] || esc(it.store)}</span>${it.free ? '<span class="chip" title="Free asset added from itch.io">Free</span>' : ''}</div>
+      <div class="ptitle">${extLink(it.url, esc(it.title))}${it.asset ? `<span class="pill st-${it.status}">${STATUS[it.status]}</span>` : ''}<span class="chip">${STORE_NAME[it.store] || esc(it.store)}</span>${it.free ? '<span class="chip" title="Free asset added from itch.io">Free</span>' : ''}</div>
       <div class="pmeta">${meta}</div>
       ${it.tags.length ? `<div>${it.tags.slice(0, 10).map((t) => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
       <div class="pfiles">${files || '<span class="dim">No files to download.</span>'}</div>
@@ -535,7 +538,7 @@ function purchaseRow(it) {
 async function viewPurchases(seq, params) {
   const cur = Object.fromEntries(params);
   const status = cur.status ?? 'missing';
-  const query = status === 'hidden' ? { hidden: 1 } : { status: status === 'all' ? '' : status };
+  const query = status === 'hidden' ? { hidden: 1 } : status === 'skipped' ? { skipped: 1 } : { status: status === 'all' ? '' : status };
   const [summary, items] = await Promise.all([
     api('/api/store/summary'),
     api('/api/store/items?' + new URLSearchParams(query)),
@@ -544,7 +547,8 @@ async function viewPurchases(seq, params) {
   const c = summary.counts;
   const tabs = ['missing', 'partial', 'downloaded', 'no-files', 'all', 'hidden']
     .map((k) => [k, k === 'all' ? 'All' : k === 'partial' ? 'Partly' : STATUS[k]]);
-  const count = (k) => (k === 'all' ? summary.total - (c.hidden || 0) : c[k] || 0);
+  if (summary.skipped || status === 'skipped') tabs.push(['skipped', 'Not assets']);
+  const count = (k) => (k === 'all' ? summary.total - (c.hidden || 0) : k === 'skipped' ? summary.skipped : c[k] || 0);
   const here = (extra) => link('/purchases', { status, ...extra });
 
   const assetPanel = summary.pending_files ? `<div class="panel" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -639,6 +643,14 @@ async function viewPurchases(seq, params) {
     if (di) return startDownload({ item_ids: [+di.dataset.dlItem] }, di);
     const df = e.target.closest('[data-dl-file]');
     if (df) return startDownload({ file_ids: [+df.dataset.dlFile] }, df);
+    const a = e.target.closest('[data-asset]');
+    if (a) {
+      await api(`/api/store/items/${a.dataset.asset}/asset`, { method: 'POST' });
+      toast('Added to your purchases');
+      a.closest('.purchase').remove();
+      refreshNavCount();
+      return;
+    }
     const b = e.target.closest('[data-hide]');
     if (!b) return;
     await api(`/api/store/items/${b.dataset.hide}/hide?hidden=${b.dataset.hidden === '1' ? 'false' : 'true'}`, { method: 'POST' });
@@ -1052,7 +1064,7 @@ async function viewSettings(seq) {
         <div id="key-block">${keyBlock}</div>
         <label for="dl">Download folder ${info('One subfolder per purchase. Always in your library.')}</label>
         <div class="inline"><input id="dl" value="${esc(it.download_dir)}" spellcheck="false">
-          <button type="button" class="btn" id="dl-pick">Browse…</button></div>
+          <button type="button" class="btn" data-pick="#dl">Browse…</button></div>
       </section>
 
       <section class="panel">
@@ -1064,7 +1076,7 @@ async function viewSettings(seq) {
           ${s.humble.connected ? '<button type="button" class="btn" id="humble-remove">Remove</button>' : ''}</div>
         <label for="hdl">Download folder ${info('One subfolder per purchase. Always in your library.')}</label>
         <div class="inline"><input id="hdl" value="${esc(s.humble.download_dir)}" spellcheck="false">
-          <button type="button" class="btn" id="hdl-pick">Browse…</button></div>
+          <button type="button" class="btn" data-pick="#hdl">Browse…</button></div>
       </section>
 
       <section class="panel">
@@ -1072,10 +1084,10 @@ async function viewSettings(seq) {
         <label for="hours">Sync automatically</label>
         <div class="inline"><select id="hours">
           ${[[0, 'Off'], [1, 'Every hour'], [6, 'Every 6 hours'], [24, 'Once a day']]
-            .map(([v, l]) => `<option value="${v}" ${+it.sync_every_hours === v ? 'selected' : ''}>${l}</option>`).join('')}
-          ${[0, 1, 6, 24].includes(+it.sync_every_hours) ? '' : `<option value="${it.sync_every_hours}" selected>Every ${it.sync_every_hours} hours</option>`}
+            .map(([v, l]) => `<option value="${v}" ${+s.sync.every_hours === v ? 'selected' : ''}>${l}</option>`).join('')}
+          ${[0, 1, 6, 24].includes(+s.sync.every_hours) ? '' : `<option value="${s.sync.every_hours}" selected>Every ${s.sync.every_hours} hours</option>`}
         </select></div>
-        <label class="check"><input type="checkbox" id="auto" ${it.auto_download ? 'checked' : ''}> Download new purchases after each sync</label>
+        <label class="check"><input type="checkbox" id="auto" ${s.sync.auto_download ? 'checked' : ''}> Download new purchases after each sync</label>
       </section>
 
       ${s.start_at_login !== null ? `<section class="panel">
@@ -1109,8 +1121,9 @@ async function viewSettings(seq) {
           <input id="pw-again" type="password" autocomplete="new-password" placeholder="Again">
           <button class="btn">Save</button></div>
       </form>
-      <label>Claude on other computers ${info('Run this on the other computer, where Packrat is installed too. It includes this Packrat’s API token.')}</label>
-      <pre class="cmd"><code>${esc(s.mcp_remote_command)}</code></pre>
+      <label for="cmd-os">Claude on other computers ${info('Run this on the other computer, where Packrat is installed too. It includes this Packrat’s API token. With the Linux AppImage, put the AppImage’s path in place of packrat.')}</label>
+      <select id="cmd-os" style="width:auto"><option value="windows">Windows (PowerShell)</option><option value="other">Linux or Mac</option></select>
+      <pre class="cmd"><code id="cmd"></code></pre>
       <div class="inline"><button type="button" class="btn small" id="copy-cmd">Copy</button>
         <button type="button" class="btn small" id="new-token" title="Commands set up with the old token stop working">New token</button>
         <span class="grow"></span>${s.auth.local ? '' : '<button type="button" class="btn small" id="sign-out">Sign out</button>'}</div>
@@ -1122,11 +1135,23 @@ async function viewSettings(seq) {
       ? roots.map((r, i) => `<div class="root">${icon('folder')}<code>${esc(r.path)}</code>
           <button type="button" class="btn small" data-add-to="containers:${i}" title="A folder holding pack folders, e.g. a bundle: each folder in it becomes a pack">Folder of packs…</button>
           <button type="button" class="btn small" data-add-to="ignore:${i}" title="Leave a folder out, e.g. backups">Ignore a folder…</button>
+          ${s.on_network ? `<button type="button" class="btn small" data-display="${i}" title="The path your other computers use for this folder, e.g. X:\\Assets. Copy path gives this path.">Shown as…</button>` : ''}
           <button type="button" class="btn small" data-remove="${i}">Remove</button></div>
+        ${r.display ? `<div class="ignored">Shown as: <span class="chip">${esc(r.display)}<button type="button" data-undisplay="${i}" aria-label="Stop showing as ${esc(r.display)}">×</button></span></div>` : ''}
         ${Object.entries(LISTS).filter(([k]) => r[k].length).map(([k, label]) => `<div class="ignored">${label}: ${r[k].map((x, j) =>
           `<span class="chip">${esc(x)}<button type="button" data-drop="${k}:${i}:${j}" aria-label="Remove ${esc(x)}">×</button></span>`).join('')}</div>`).join('')}`).join('')
       : '<p class="warn">No folders yet.</p>';
     $$('[data-remove]').forEach((b) => { b.onclick = () => { roots.splice(+b.dataset.remove, 1); renderRoots(); }; });
+    $$('[data-display]').forEach((b) => {
+      b.onclick = () => {
+        const r = roots[+b.dataset.display];
+        const shown = prompt(`Path your other computers use for ${r.path} (e.g. X:\\Assets):`, r.display || '');
+        if (shown === null) return;
+        r.display = shown.trim() || null;
+        renderRoots();
+      };
+    });
+    $$('[data-undisplay]').forEach((b) => { b.onclick = () => { roots[+b.dataset.undisplay].display = null; renderRoots(); }; });
     $$('[data-add-to]').forEach((b) => {
       b.onclick = async () => {
         const [list, i] = b.dataset.addTo.split(':');
@@ -1154,10 +1179,13 @@ async function viewSettings(seq) {
     const path = await pickFolder(roots.at(-1)?.path);
     if (path && !roots.some((r) => r.path === path)) { roots.push({ path, containers: [], ignore: [] }); renderRoots(); }
   };
-  $('#dl-pick').onclick = async () => {
-    const path = await pickFolder($('#dl').value.trim() || null);
-    if (path) $('#dl').value = path;
-  };
+  $$('[data-pick]').forEach((b) => {  // Browse… next to a download folder
+    b.onclick = async () => {
+      const input = $(b.dataset.pick);
+      const path = await pickFolder(input.value.trim() || null);
+      if (path) input.value = path;
+    };
+  });
 
   const bindKey = () => {
     const save = $('#key-save');
@@ -1187,10 +1215,6 @@ async function viewSettings(seq) {
   };
   bindKey();
 
-  $('#hdl-pick').onclick = async () => {
-    const path = await pickFolder($('#hdl').value.trim() || null);
-    if (path) $('#hdl').value = path;
-  };
   $('#humble-save').onclick = async () => {
     const btn = $('#humble-save');
     btn.disabled = true;
@@ -1222,7 +1246,11 @@ async function viewSettings(seq) {
         route();
       } catch (err) { toast(err.message); }
     };
-    $('#copy-cmd').onclick = () => copyText(s.mcp_remote_command);
+    const command = () => ($('#cmd-os').value === 'windows' ? s.mcp_remote_command_windows : s.mcp_remote_command);
+    $('#cmd-os').value = navigator.userAgent.includes('Windows') ? 'windows' : 'other';
+    $('#cmd-os').onchange = () => { $('#cmd').textContent = command(); };
+    $('#cmd-os').onchange();
+    $('#copy-cmd').onclick = () => copyText(command());
     $('#new-token').onclick = async () => {
       if (!confirm('Make a new token? Claude set up with the old one stops working until you run the new command.')) return;
       await api('/api/auth/token', { method: 'POST' });
@@ -1253,8 +1281,9 @@ async function viewSettings(seq) {
         method: 'PUT',
         body: JSON.stringify({
           roots,
-          itch: { download_dir: $('#dl').value.trim() || null, sync_every_hours: +$('#hours').value, auto_download: $('#auto').checked },
+          itch: { download_dir: $('#dl').value.trim() || null },
           humble: { download_dir: $('#hdl').value.trim() || null },
+          sync: { every_hours: +$('#hours').value, auto_download: $('#auto').checked },
           start_at_login: $('#login') ? $('#login').checked : null,
         }),
       });
@@ -1290,7 +1319,7 @@ function scanText(job) {
 /** The message shown when each kind of job finishes. */
 const FINISHED = {
   scan: (j) => (j.error ? `Scan failed: ${j.error}` : 'Scan finished'),
-  itch: (j) => {
+  sync: (j) => {
     const n = j.result?.errors || 0;
     return j.error ? `Sync failed: ${j.error}` : n ? `Sync finished with ${plural(n, 'problem')}` : 'Sync finished';
   },
@@ -1306,7 +1335,7 @@ async function trackActivity() {
   clearTimeout(activityTimer);
   const a = await api('/api/activity').catch(() => null);
   if (!a) return;
-  const { scan, itch: sync, download: dl } = a;
+  const { scan, sync, download: dl } = a;
   const el = $('#activity');
   el.hidden = !scan.running && !sync.running && !dl.running;
   el.textContent = dl.running ? downloadText(dl) : sync.running ? 'Syncing…' : scanText(scan);
@@ -1322,7 +1351,7 @@ async function trackActivity() {
 
   const finished = Object.keys(FINISHED).filter((k) => activityWas[k] && !a[k].running);
   finished.forEach((k) => toast(FINISHED[k](a[k])));
-  activityWas = { scan: scan.running, itch: sync.running, download: dl.running };
+  activityWas = { scan: scan.running, sync: sync.running, download: dl.running };
   if (finished.length) {
     forgetLibraryViews();
     refreshNavCount();

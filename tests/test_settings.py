@@ -20,12 +20,12 @@ def test_save_and_reload(tmp_path):
     lib = tmp_path / "lib"
     lib.mkdir()
     cfg = config.load(str(tmp_path / "config.toml"))  # not created yet
-    settings.save(cfg, [{"path": str(lib)}], {"download_dir": None, "sync_every_hours": 6, "auto_download": True})
+    settings.save(cfg, [{"path": str(lib)}], {"itch": None}, {"every_hours": 6, "auto_download": True})
     if os.name != "nt":  # Windows has no Unix permissions; the user profile folder keeps it private there
         assert oct(os.stat(cfg.source).st_mode & 0o777) == "0o600"
     again = config.load(cfg.source)
     assert [r.path for r in again.roots if not r.auto] == [str(lib)]
-    assert again.itch_sync_hours == 6 and again.itch_auto_download
+    assert again.sync_hours == 6 and again.auto_download
     assert again.itch_download_dir == config.default_download_dir()  # the default isn't written out
 
 
@@ -111,3 +111,22 @@ def test_bundled_linux_app_starts_programs_with_system_libraries(monkeypatch):
     assert "LD_LIBRARY_PATH" not in program.external_env()  # nothing was set before the app started
     monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/opt/mylibs")
     assert program.external_env()["LD_LIBRARY_PATH"] == "/opt/mylibs"  # the user's own value comes back
+
+
+def test_shown_as_path_for_other_computers(tmp_path):
+    lib = tmp_path / "library" / "assets"
+    os.makedirs(lib / "Forest")
+    os.makedirs(tmp_path / "library" / "assets-old" / "x")
+    (tmp_path / "c.toml").write_text(f"[[roots]]\npath = {toml_str(lib)}\n")
+    cfg = config.load(str(tmp_path / "c.toml"))
+    settings.save(cfg, [{"path": str(lib), "display": "X:\\Assets", "containers": [], "ignore": []}], {}, {})
+    cfg = config.load(str(tmp_path / "c.toml"))
+    assert cfg.display_path(str(lib / "Forest"), "tiles/a.png") == "X:\\Assets\\Forest\\tiles\\a.png"
+    other = str(tmp_path / "library" / "assets-old" / "x")
+    assert cfg.display_path(other) == other  # a sibling folder isn't translated
+
+
+def test_sync_settings_from_before_0_2_1_still_apply(tmp_path):
+    (tmp_path / "c.toml").write_text("[itch]\nsync_every_hours = 12.0\nauto_download = true\n")
+    cfg = config.load(str(tmp_path / "c.toml"))
+    assert cfg.sync_hours == 12 and cfg.auto_download

@@ -111,7 +111,7 @@ def test_download_into_the_humble_folder(cfg, monkeypatch, tmp_path):
         assert "signed" in url  # a fresh link from the order, not a stored one
         open(target, "wb").write(b"z" * 5000)
         return 5000
-    monkeypatch.setattr(humble, "fetch_to", fake_fetch)
+    monkeypatch.setattr(stores, "fetch_to", fake_fetch)
     with db.connect(cfg) as c:
         fid = c.execute("SELECT id FROM store_files WHERE filename='forest_tiles.zip'").fetchone()[0]
     out = stores.download_many(cfg, [fid])
@@ -140,10 +140,22 @@ def test_connect_from_settings(cfg):
     s = client.get("/api/settings").json()
     assert s["humble"]["connected"] and "abc" not in str(s)  # the cookie is never sent back
     for _ in range(100):  # connecting starts a sync
-        if not client.get("/api/activity").json()["itch"]["running"]:
+        if not client.get("/api/activity").json()["sync"]["running"]:
             break
         time.sleep(0.05)
     titles = [i["title"] for i in client.get("/api/store/items").json()]
     assert sorted(titles) == ["Forest Tiles", "Sprite Tool"]
     FakeClient.expired = True
     assert client.post("/api/settings/humble-cookie", json={"cookie": "bad"}).status_code == 400
+
+
+def test_count_a_skipped_product_as_an_asset(cfg):
+    humble.sync(cfg)
+    client = TestClient(create_app(cfg), base_url="http://localhost")
+    assert client.get("/api/store/summary").json()["skipped"] == 1
+    skipped = client.get("/api/store/items?skipped=1").json()
+    assert [i["title"] for i in skipped] == ["A Novel"] and not skipped[0]["asset"]
+    assert client.post(f"/api/store/items/{skipped[0]['id']}/asset").status_code == 200
+    humble.sync(cfg, force=True)  # a later sync keeps the choice
+    assert "A Novel" in listed(cfg)
+    assert client.get("/api/store/summary").json()["skipped"] == 0
