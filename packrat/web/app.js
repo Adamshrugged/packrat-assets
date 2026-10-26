@@ -289,10 +289,15 @@ function fileRow(f, showPack) {
   </div>`;
 }
 
+/** Small pixel art (e.g. 16×16 tiles) would be a speck in its preview box: draw it box-sized, with crisp pixels. */
+function enlargeSmall(img) {
+  if (img.naturalWidth <= 128 && img.naturalHeight <= 128) img.classList.add('enlarged');
+}
+
 function tile(f, showPack) {
   const sub = showPack ? f.pack_name : '';
   return `<button class="tile" data-tile="${f.id}" title="${esc(f.rel)}">
-    <div class="thumb checker">${f.thumb ? `<img src="${f.thumb}" loading="lazy" alt="">` : `<div class="ph">${icon(f.kind)}</div>`}</div>
+    <div class="thumb checker">${f.thumb ? `<img src="${f.thumb}" loading="lazy" alt="" onload="enlargeSmall(this)">` : `<div class="ph">${icon(f.kind)}</div>`}</div>
     <div class="cap">${esc(f.name)}${sub ? `<small>${esc(sub)}</small>` : ''}</div>
   </button>`;
 }
